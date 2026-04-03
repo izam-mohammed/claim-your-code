@@ -22,16 +22,43 @@ const (
 
 // Report is the top-level structure persisted to disk.
 type Report struct {
-	ID           string            `json:"id"`
-	Version      string            `json:"version"`
-	Repo         string            `json:"repo"`
-	CreatedAt    time.Time         `json:"created_at"`
-	Summary      Summary           `json:"summary"`
-	Branches     []Branch          `json:"branches"`
-	Commits      []Commit          `json:"commits"`
-	OriginalRefs map[string]string `json:"original_refs,omitempty"` // branch name -> commit hash before rewrite
-	Result       *Result           `json:"result,omitempty"`
-	Reverted     *Reverted         `json:"reverted,omitempty"`
+	ID        string    `json:"id"`
+	Version   string    `json:"version"`
+	Repo      string    `json:"repo"`
+	CreatedAt time.Time `json:"created_at"`
+	Summary   Summary   `json:"summary"`
+	Branches  []Branch  `json:"branches"`
+	Commits   []Commit  `json:"commits"`
+
+	// Remote tracking
+	RemoteURL   string `json:"remote_url,omitempty"`
+	RemoteOwner string `json:"remote_owner,omitempty"`
+	RemoteRepo  string `json:"remote_repo,omitempty"`
+	PRNumber    int    `json:"pr_number,omitempty"`
+	PRTitle     string `json:"pr_title,omitempty"`
+	PRBranch    string `json:"pr_branch,omitempty"`
+
+	// Git state tracking
+	GitState *GitState `json:"git_state,omitempty"`
+
+	// Legacy field — migrated to GitState.BeforeRefs
+	OriginalRefs map[string]string `json:"original_refs,omitempty"`
+
+	Result   *Result   `json:"result,omitempty"`
+	Reverted *Reverted `json:"reverted,omitempty"`
+}
+
+// GitState tracks the git state before/after a rewrite and push status.
+type GitState struct {
+	BeforeRefs map[string]string `json:"before_refs"`            // branch → hash before rewrite
+	AfterRefs  map[string]string `json:"after_refs,omitempty"`   // branch → hash after rewrite
+	PushedAt   *time.Time        `json:"pushed_at,omitempty"`    // when force-pushed
+	PushError  string            `json:"push_error,omitempty"`   // if push failed
+}
+
+// IsRemote returns true if this report is from a remote GitHub source.
+func (r *Report) IsRemote() bool {
+	return r.RemoteURL != ""
 }
 
 type Summary struct {
@@ -143,7 +170,36 @@ func Build(version, repoPath string, totalCommits int, results []scanner.Result,
 
 // SetOriginalRefs stores branch -> hash mapping before rewrite.
 func (r *Report) SetOriginalRefs(refs map[string]string) {
-	r.OriginalRefs = refs
+	if r.GitState == nil {
+		r.GitState = &GitState{}
+	}
+	r.GitState.BeforeRefs = refs
+	r.OriginalRefs = refs // keep legacy field for backward compat
+}
+
+// SetAfterRefs stores branch -> hash mapping after rewrite.
+func (r *Report) SetAfterRefs(refs map[string]string) {
+	if r.GitState == nil {
+		r.GitState = &GitState{}
+	}
+	r.GitState.AfterRefs = refs
+}
+
+// SetPushed records that a force-push was performed.
+func (r *Report) SetPushed() {
+	if r.GitState == nil {
+		r.GitState = &GitState{}
+	}
+	now := time.Now().UTC()
+	r.GitState.PushedAt = &now
+}
+
+// SetPushError records a push failure.
+func (r *Report) SetPushError(err string) {
+	if r.GitState == nil {
+		r.GitState = &GitState{}
+	}
+	r.GitState.PushError = err
 }
 
 // SetResult records the outcome of the rewrite operation.
@@ -164,7 +220,22 @@ func (r *Report) SetReverted() {
 
 // IsRevertible returns true if this report was a successful clean that hasn't been reverted.
 func (r *Report) IsRevertible() bool {
-	return r.Result != nil && r.Result.Status == "cleaned" && r.Reverted == nil && len(r.OriginalRefs) > 0
+	if r.Result == nil || r.Result.Status != "cleaned" || r.Reverted != nil {
+		return false
+	}
+	// Check GitState.BeforeRefs first, fall back to legacy OriginalRefs
+	if r.GitState != nil && len(r.GitState.BeforeRefs) > 0 {
+		return true
+	}
+	return len(r.OriginalRefs) > 0
+}
+
+// GetBeforeRefs returns the branch refs from before the rewrite (for revert).
+func (r *Report) GetBeforeRefs() map[string]string {
+	if r.GitState != nil && len(r.GitState.BeforeRefs) > 0 {
+		return r.GitState.BeforeRefs
+	}
+	return r.OriginalRefs
 }
 
 // Save writes the report as JSON to the centralized data directory.

@@ -2,6 +2,7 @@ package report
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/fatih/color"
@@ -76,9 +77,19 @@ func PrintList(reports []*Report) {
 		}
 		modelStr := strings.Join(modelParts, ", ")
 
-		fmt.Printf("  %s %s  %s  %s  %s%s\n",
+		// Source label
+		source := dim(filepath.Base(r.Repo))
+		if r.IsRemote() {
+			source = dim(r.RemoteOwner + "/" + r.RemoteRepo)
+			if r.PRNumber > 0 {
+				source = dim(fmt.Sprintf("%s/%s#%d", r.RemoteOwner, r.RemoteRepo, r.PRNumber))
+			}
+		}
+
+		fmt.Printf("  %s %s  %s  %s  %s  %s%s\n",
 			icon,
 			boldCyan(r.ID),
+			source,
 			dim(r.CreatedAt.Local().Format("2006-01-02 15:04")),
 			bold(fmt.Sprintf("%d commits", r.Summary.AffectedCommits)),
 			dim(modelStr),
@@ -98,7 +109,17 @@ func PrintDetail(r *Report) {
 
 	// Meta
 	fmt.Printf("  %s  %s\n", dim("ID:"), boldCyan(r.ID))
-	fmt.Printf("  %s  %s\n", dim("Repo:"), bold(r.Repo))
+	if r.IsRemote() {
+		fmt.Printf("  %s  %s\n", dim("Source:"), bold(r.RemoteURL))
+		if r.PRNumber > 0 {
+			fmt.Printf("  %s  %s %s\n", dim("PR:"), bold(fmt.Sprintf("#%d", r.PRNumber)), dim(r.PRTitle))
+			if r.PRBranch != "" {
+				fmt.Printf("  %s  %s\n", dim("Branch:"), cyan(r.PRBranch))
+			}
+		}
+	} else {
+		fmt.Printf("  %s  %s\n", dim("Repo:"), bold(r.Repo))
+	}
 	fmt.Printf("  %s  %s\n", dim("Date:"), r.CreatedAt.Local().Format("2006-01-02 15:04:05"))
 	fmt.Printf("  %s  %s\n", dim("Tool:"), fmt.Sprintf("claim %s", r.Version))
 
@@ -111,6 +132,13 @@ func PrintDetail(r *Report) {
 		fmt.Printf("  %s  %s %s\n", dim("Status:"), dim("↩"), dim("reverted"))
 	} else {
 		fmt.Printf("  %s  %s %s\n", dim("Status:"), statusIcon(status), statusLabel(status))
+	}
+
+	// Push status
+	if r.GitState != nil && r.GitState.PushedAt != nil {
+		fmt.Printf("  %s  %s %s\n", dim("Pushed:"), green("✓"), dim(r.GitState.PushedAt.Local().Format("2006-01-02 15:04:05")))
+	} else if r.GitState != nil && r.GitState.PushError != "" {
+		fmt.Printf("  %s  %s %s\n", dim("Pushed:"), red("✗"), dim(r.GitState.PushError))
 	}
 	fmt.Println()
 

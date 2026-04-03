@@ -151,7 +151,7 @@ func TestRevert(t *testing.T) {
 func TestRevertInvalidRef(t *testing.T) {
 	dir := t.TempDir()
 	// Not a git repo at all — should fail
-	err := Revert(dir, map[string]string{"main": "abc123"})
+	err := Revert(dir, map[string]string{"main": "0000000000000000000000000000000000000000"})
 	if err == nil {
 		t.Error("expected error reverting in non-git directory")
 	}

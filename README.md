@@ -1,14 +1,14 @@
 # claim
 
-Strip `Co-Authored-By: Claude` lines from your git commit history.
+Remove Claude as a co-author from your git commit history.
 
-When you use Claude Code (or similar AI tools), commits get tagged with co-author lines like:
+When you use Claude Code (or similar AI tools), commits are automatically co-authored with Claude:
 
 ```
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 ```
 
-`claim` removes these lines so you can claim your code as your own.
+`claim` finds and removes Claude's co-authorship so you can fully own your commits.
 
 ## Install
 
@@ -44,33 +44,83 @@ go install github.com/izam-mohammed/claim-your-code/cmd/claim@latest
 
 ## Usage
 
+### Local repositories
+
 ```sh
 claim <folder>
+claim .
 ```
 
-### Example
+### Remote GitHub repositories
+
+```sh
+# Paste any GitHub URL directly
+claim https://github.com/owner/repo
+claim https://github.com/owner/repo/pull/42
+claim git@github.com:owner/repo.git
+
+# Or use explicit subcommands
+claim repo owner/repo
+claim pr owner/repo#42
+claim org my-organization
+claim user some-username
+```
+
+Remote commands default to **scan-only**. Add `--apply` to rewrite and force-push.
+
+### Example (local)
 
 ```
 $ claim ./my-project
 
-Scanning commits in './my-project'...
+:: Scanning commits in my-project
 
-Found 12 commit(s) with Co-Authored-By: Claude lines:
+! Found 12 co-authored commit(s) across 45 total commits
 
-  a1b2c3d4  Fix authentication bug
-  e5f6g7h8  Add user profile page
-  i9j0k1l2  Refactor database queries
-  ... and 9 more
+Branches:
+  → main  (10 commit(s))
+      Claude Opus 4.6  × 7
+      Claude Sonnet 4.5  × 3
+  → feature  (2 commit(s))
+      Claude Opus 4.6  × 2
 
-This will rewrite git history for 12 commit(s).
-Proceed? [y/N] y
+Commits:
+  a1b2c3d4 Fix authentication bug (Claude Opus 4.6)
+  e5f6g7h8 Add user profile page (Claude Sonnet 4.5)
+  ... and 10 more
 
-Rewriting commit messages...
+⚠ This will rewrite git history for 12 commit(s).
+  Proceed? [y/N] y
 
-Done! Cleaned 12 commit(s).
+:: Rewriting commit messages...
 
-Note: If you have already pushed these commits, you will need to force-push:
+✓ Cleaned 12 commit(s)
+
+Note: If you've already pushed, force-push to update remote:
   git push --force-with-lease
+```
+
+### Example (remote)
+
+```
+$ claim repo izam-mohammed/my-project --apply
+
+:: Authenticating with GitHub...
+  ✓ Authenticated as izam-mohammed
+
+:: Fetching repo info for izam-mohammed/my-project
+:: Cloning izam-mohammed/my-project...
+:: Scanning commits...
+
+! Found 5 co-authored commit(s) across 20 total commits
+
+⚠ This will rewrite and force-push izam-mohammed/my-project to main
+  Proceed? [y/N] y
+
+:: Rewriting commit messages...
+:: Pushing to izam-mohammed/my-project...
+
+✓ Cleaned and pushed 5 commit(s) in izam-mohammed/my-project
 ```
 
 ### Flags
@@ -79,28 +129,34 @@ Note: If you have already pushed these commits, you will need to force-push:
 |---|---|
 | `--dry-run` | Show affected commits without modifying anything |
 | `--force`, `-f` | Skip confirmation prompt |
+| `--apply` | For remote repos, rewrite and force-push (default: scan only) |
+| `--api-only` | Scan via GitHub API without cloning (faster, may miss old commits) |
 | `--version`, `-v` | Show version |
 | `--help`, `-h` | Show help |
 
-## Updating GitHub remote
+### Reports
 
-After running `claim`, your local history has been rewritten — but your GitHub remote still has the old commits. You need to force-push to update it:
-
-```sh
-# Push all rewritten branches
-git push --force-with-lease --all
-
-# If you also have tags pointing to rewritten commits
-git push --force-with-lease --tags
-```
-
-> **Warning:** Force-pushing rewrites history for anyone who has cloned or forked your repo. If others are collaborating, coordinate with them first — they will need to re-clone or run `git pull --rebase` after the push.
-
-For a single branch:
+Every scan is tracked. View reports with:
 
 ```sh
-git push --force-with-lease origin main
+claim report              # list all reports
+claim report <id>         # show details
+claim report all          # show all in detail
+claim revert <id>         # revert a clean
 ```
+
+## Authentication
+
+For remote commands, `claim` needs a GitHub token. It tries these in order:
+
+1. **Cached token** from a previous session
+2. **`CLAIM_GITHUB_TOKEN`** environment variable
+3. **`GITHUB_TOKEN`** environment variable
+4. **`gh` CLI** — extracts token from `gh auth token`
+5. **OAuth Device Flow** — opens browser for authorization
+6. **Interactive prompt** — paste a Personal Access Token
+
+Tokens are cached securely in your OS data directory.
 
 ## What it matches
 
@@ -119,6 +175,7 @@ Non-Claude co-author lines are preserved.
 2. Shows you the affected commits and asks for confirmation
 3. Rewrites history using `git filter-branch` (requires git installed)
 4. Cleans up backup refs automatically
+5. For remote repos: clones to temp dir, rewrites, force-pushes, cleans up
 
 ## License
 
