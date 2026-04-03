@@ -56,18 +56,21 @@ func TestScan(t *testing.T) {
 	run("git", "add", "c.txt")
 	run("git", "commit", "-m", "Add feature\n\nCo-Authored-By: Claude Sonnet 4.5 (1M context) <noreply@anthropic.com>")
 
-	results, branchSummaries, err := Scan(repoPath)
+	out, err := Scan(repoPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(results) != 2 {
-		t.Fatalf("expected 2 results, got %d", len(results))
+	if out.TotalCommits != 3 {
+		t.Errorf("expected 3 total commits, got %d", out.TotalCommits)
+	}
+	if len(out.Results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(out.Results))
 	}
 
 	// Check results have model and branch info
 	models := map[string]bool{}
-	for _, r := range results {
+	for _, r := range out.Results {
 		if len(r.Hash) != 40 {
 			t.Errorf("expected 40-char hash, got %q", r.Hash)
 		}
@@ -87,11 +90,11 @@ func TestScan(t *testing.T) {
 	}
 
 	// Check branch summaries
-	if len(branchSummaries) == 0 {
+	if len(out.BranchSummaries) == 0 {
 		t.Fatal("expected at least one branch summary")
 	}
 	found := false
-	for _, bs := range branchSummaries {
+	for _, bs := range out.BranchSummaries {
 		if bs.Count == 2 {
 			found = true
 			if len(bs.Models) != 2 {
@@ -106,7 +109,7 @@ func TestScan(t *testing.T) {
 
 func TestScanNotARepo(t *testing.T) {
 	dir := t.TempDir()
-	_, _, err := Scan(dir)
+	_, err := Scan(dir)
 	if err == nil {
 		t.Error("expected error for non-git directory")
 	}

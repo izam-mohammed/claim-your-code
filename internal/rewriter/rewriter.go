@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // Rewrite uses git filter-branch to strip Claude co-author lines from all commits.
@@ -42,6 +43,37 @@ func Rewrite(repoPath string) error {
 		}
 	}
 
+	return nil
+}
+
+// GetBranchRefs returns a map of branch name -> commit hash for all local branches.
+func GetBranchRefs(repoPath string) (map[string]string, error) {
+	cmd := exec.Command("git", "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads/")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read branch refs: %w", err)
+	}
+
+	refs := map[string]string{}
+	for _, line := range splitLines(string(out)) {
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) == 2 {
+			refs[parts[0]] = parts[1]
+		}
+	}
+	return refs, nil
+}
+
+// Revert restores branches to the given original refs.
+func Revert(repoPath string, originalRefs map[string]string) error {
+	for branch, hash := range originalRefs {
+		cmd := exec.Command("git", "update-ref", fmt.Sprintf("refs/heads/%s", branch), hash)
+		cmd.Dir = repoPath
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to restore %s to %s: %w\n%s", branch, hash[:8], err, out)
+		}
+	}
 	return nil
 }
 

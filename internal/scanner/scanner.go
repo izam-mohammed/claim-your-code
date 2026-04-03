@@ -22,12 +22,19 @@ type BranchSummary struct {
 	Models map[string]int // model name -> count
 }
 
+// ScanOutput holds the complete scan results.
+type ScanOutput struct {
+	Results         []Result
+	BranchSummaries []BranchSummary
+	TotalCommits    int
+}
+
 // Scan opens a git repository at repoPath and returns all commits
 // that contain a Claude Co-Authored-By line, along with branch info.
-func Scan(repoPath string) ([]Result, []BranchSummary, error) {
+func Scan(repoPath string) (*ScanOutput, error) {
 	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Build a map of commit hash -> branch names
@@ -36,7 +43,7 @@ func Scan(repoPath string) ([]Result, []BranchSummary, error) {
 
 	refs, err := repo.References()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	err = refs.ForEach(func(ref *plumbing.Reference) error {
 		if ref.Name().IsBranch() {
@@ -46,7 +53,7 @@ func Scan(repoPath string) ([]Result, []BranchSummary, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// For each branch, walk its commits and record membership
@@ -65,10 +72,11 @@ func Scan(repoPath string) ([]Result, []BranchSummary, error) {
 	// Scan all commits for Claude co-author
 	iter, err := repo.Log(&git.LogOptions{All: true})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	seen := map[string]bool{}
+	totalCommits := 0
 	var results []Result
 	err = iter.ForEach(func(c *object.Commit) error {
 		h := c.Hash.String()
@@ -76,6 +84,7 @@ func Scan(repoPath string) ([]Result, []BranchSummary, error) {
 			return nil
 		}
 		seen[h] = true
+		totalCommits++
 
 		if pattern.ContainsClaudeCoAuthor(c.Message) {
 			model := pattern.ExtractModelName(c.Message)
@@ -93,7 +102,7 @@ func Scan(repoPath string) ([]Result, []BranchSummary, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Build per-branch summary
@@ -117,7 +126,11 @@ func Scan(repoPath string) ([]Result, []BranchSummary, error) {
 		summaries = append(summaries, *bs)
 	}
 
-	return results, summaries, nil
+	return &ScanOutput{
+		Results:         results,
+		BranchSummaries: summaries,
+		TotalCommits:    totalCommits,
+	}, nil
 }
 
 func firstLine(s string) string {
