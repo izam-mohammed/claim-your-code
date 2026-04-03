@@ -74,10 +74,13 @@ type Branch struct {
 }
 
 type Commit struct {
-	Hash     string   `json:"hash"`
-	Subject  string   `json:"subject"`
-	Model    string   `json:"model"`
-	Branches []string `json:"branches"`
+	Hash         string   `json:"hash"`
+	Subject      string   `json:"subject"`
+	Model        string   `json:"model"`
+	Branches     []string `json:"branches"`
+	FilesChanged int      `json:"files_changed,omitempty"`
+	Insertions   int      `json:"insertions,omitempty"`
+	Deletions    int      `json:"deletions,omitempty"`
 }
 
 type Result struct {
@@ -137,10 +140,13 @@ func Build(version, repoPath string, totalCommits int, results []scanner.Result,
 			models[r.Model]++
 		}
 		commits[i] = Commit{
-			Hash:     r.Hash,
-			Subject:  r.Subject,
-			Model:    r.Model,
-			Branches: r.Branches,
+			Hash:         r.Hash,
+			Subject:      r.Subject,
+			Model:        r.Model,
+			Branches:     r.Branches,
+			FilesChanged: r.FilesChanged,
+			Insertions:   r.Insertions,
+			Deletions:    r.Deletions,
 		}
 	}
 

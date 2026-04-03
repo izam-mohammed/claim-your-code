@@ -66,8 +66,8 @@ func PrintList(reports []*Report) {
 		// Reverted tag
 		revertTag := ""
 		if r.Reverted != nil {
-			icon = dim("↩")
-			revertTag = dim(" (reverted)")
+			icon = red("↩")
+			revertTag = red(" (reverted)")
 		}
 
 		// Models summary
@@ -189,7 +189,8 @@ func PrintDetail(r *Report) {
 		if len(c.Branches) > 0 {
 			branchTags = dim(" [" + strings.Join(c.Branches, ", ") + "]")
 		}
-		fmt.Printf("  %s %s%s%s\n", dim(c.Hash[:8]), c.Subject, modelTag, branchTags)
+		stat := formatDiffStat(c.Insertions, c.Deletions)
+		fmt.Printf("  %s %s%s%s%s\n", dim(c.Hash[:8]), c.Subject, stat, modelTag, branchTags)
 	}
 
 	// Result details
@@ -229,4 +230,18 @@ func renderBar(pct float64, width int) string {
 		strings.Repeat("█", filled),
 		strings.Repeat("░", width-filled),
 		pct)
+}
+
+func formatDiffStat(ins, del int) string {
+	if ins == 0 && del == 0 {
+		return ""
+	}
+	parts := []string{}
+	if ins > 0 {
+		parts = append(parts, green(fmt.Sprintf("+%d", ins)))
+	}
+	if del > 0 {
+		parts = append(parts, red(fmt.Sprintf("-%d", del)))
+	}
+	return " " + strings.Join(parts, dim("/"))
 }

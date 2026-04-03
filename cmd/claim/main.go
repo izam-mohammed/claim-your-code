@@ -42,6 +42,13 @@ func confirm(prompt string) bool {
 	return answer == "y" || answer == "yes"
 }
 
+// confirmDangerous requires the user to type "confirm" for destructive actions like pushing.
+func confirmDangerous(prompt string) bool {
+	fmt.Printf("%s %s ", prompt, dim(`[type "confirm" to proceed]`))
+	answer, _ := stdinReader.ReadString('\n')
+	return strings.TrimSpace(strings.ToLower(answer)) == "confirm"
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -272,42 +279,14 @@ func claimRepo(repoPath string, dryRun, force bool) {
 		dim(fmt.Sprintf("%d total commits", scan.TotalCommits)))
 
 	// Show per-branch breakdown with model info
-	fmt.Printf("\n%s\n", bold("Branches:"))
-	for _, bs := range scan.BranchSummaries {
-		fmt.Printf("  %s %s  %s\n",
-			cyan("→"),
-			bold(bs.Branch),
-			dim(fmt.Sprintf("(%d commit(s))", bs.Count)))
-		for model, count := range bs.Models {
-			fmt.Printf("      %s  %s\n",
-				yellow(model),
-				dim(fmt.Sprintf("× %d", count)))
-		}
-	}
-
-	// Show affected commits
-	fmt.Printf("\n%s\n", bold("Commits:"))
-	limit := len(results)
-	if limit > 10 {
-		limit = 10
-	}
-	for _, r := range results[:limit] {
-		modelTag := ""
-		if r.Model != "" {
-			modelTag = dim(" (" + r.Model + ")")
-		}
-		fmt.Printf("  %s %s%s\n", dim(r.Hash[:8]), r.Subject, modelTag)
-	}
-	if len(results) > 10 {
-		fmt.Printf("  %s\n", dim(fmt.Sprintf("... and %d more", len(results)-10)))
-	}
+	printBranchesAndCommits(scan, results)
 
 	if dryRun {
 		rpt.SetResult("dry_run", 0)
 		if err := rpt.Save(); err != nil {
 			fmt.Fprintf(os.Stderr, "%s Failed to record report: %v\n", yellow("Warning:"), err)
 		} else {
-			fmt.Printf("\n%s Report tracked %s\n", dim("→"), dim(rpt.ID))
+			fmt.Printf("\n%s Report tracked %s\n", dim("→"), boldCyan(rpt.ID))
 		}
 		fmt.Printf("\n%s No changes made.\n", yellow("--dry-run:"))
 		return
@@ -341,18 +320,61 @@ func claimRepo(repoPath string, dryRun, force bool) {
 		return
 	}
 
+	afterRefs, _ := rewriter.GetBranchRefs(repoPath)
+	rpt.SetAfterRefs(afterRefs)
+
 	rpt.SetResult("cleaned", len(results))
 	if err := rpt.Save(); err != nil {
 		fmt.Fprintf(os.Stderr, "%s Failed to record report: %v\n", yellow("Warning:"), err)
 	} else {
-		fmt.Printf("\n%s Report tracked %s\n", dim("→"), dim(rpt.ID))
+		fmt.Printf("\n%s Report tracked %s\n", dim("→"), boldCyan(rpt.ID))
 	}
 
 	fmt.Printf("\n%s Cleaned %s\n",
 		green("✓"),
 		bold(fmt.Sprintf("%d commit(s)", len(results))))
-	fmt.Printf("\n%s If you've already pushed, force-push to update remote:\n", yellow("Note:"))
-	fmt.Printf("  %s\n", cyan("git push --force-with-lease"))
+
+	// Offer to push if repo has a remote
+	promptPush(repoPath, rpt, originalRefs, afterRefs)
+}
+
+// promptPush offers to force-push rewritten branches to remote.
+func promptPush(repoPath string, rpt *report.Report, beforeRefs, afterRefs map[string]string) {
+	remoteURL := rewriter.GetRemoteURL(repoPath)
+	if remoteURL == "" {
+		fmt.Printf("\n%s No remote found. When you add one, push with:\n", yellow("→"))
+		fmt.Printf("  %s\n", cyan("git push --force-with-lease --all"))
+		return
+	}
+
+	changed := rewriter.ChangedBranches(beforeRefs, afterRefs)
+	if len(changed) == 0 {
+		return
+	}
+
+	fmt.Printf("\n%s Push rewritten branches to %s?\n", boldRed("⚠"), bold(remoteURL))
+	fmt.Printf("  Branches: %s\n", cyan(strings.Join(changed, ", ")))
+	fmt.Printf("\n  %s This will %s to the remote.\n",
+		boldRed("⚠"),
+		bold("force-push"))
+
+	if !confirmDangerous("  ") {
+		fmt.Printf("\n%s Push skipped. You can push manually:\n", yellow("→"))
+		fmt.Printf("  %s\n", cyan("git push --force-with-lease --all"))
+		return
+	}
+
+	fmt.Printf("\n%s Pushing to remote...\n", cyan("::"))
+	if err := rewriter.PushBranches(repoPath, beforeRefs, afterRefs); err != nil {
+		rpt.SetPushError(err.Error())
+		_ = rpt.Save()
+		fmt.Fprintf(os.Stderr, "%s Push failed: %v\n", red("Error:"), err)
+		return
+	}
+
+	rpt.SetPushed()
+	_ = rpt.Save()
+	fmt.Printf("\n%s Pushed %s to remote\n", green("✓"), bold(strings.Join(changed, ", ")))
 }
 
 // --- REMOTE ---
@@ -476,7 +498,7 @@ func runRemoteRepoWithTarget(target *remote.Target) {
 	if flags.dryRun {
 		rpt.SetResult("dry_run", 0)
 		_ = rpt.Save()
-		fmt.Printf("\n%s Report tracked %s\n", dim("→"), dim(rpt.ID))
+		fmt.Printf("\n%s Report tracked %s\n", dim("→"), boldCyan(rpt.ID))
 		fmt.Printf("\n%s No changes made.\n", yellow("--dry-run:"))
 		return
 	}
@@ -484,25 +506,25 @@ func runRemoteRepoWithTarget(target *remote.Target) {
 	if !flags.apply {
 		rpt.SetResult("dry_run", 0)
 		_ = rpt.Save()
-		fmt.Printf("\n%s Report tracked %s\n", dim("→"), dim(rpt.ID))
+		fmt.Printf("\n%s Report tracked %s\n", dim("→"), boldCyan(rpt.ID))
 		fmt.Printf("\n%s This was a scan-only run. To rewrite and push, add %s\n", yellow("Note:"), cyan("--apply"))
 		return
 	}
 
 	// Apply: rewrite + push
+	originalRefs, _ := rewriter.GetBranchRefs(repoPath)
+	rpt.SetOriginalRefs(originalRefs)
+
 	if !flags.force {
-		fmt.Printf("\n%s This will rewrite and %s %s to %s\n",
-			boldRed("⚠"), bold("force-push"), bold(target.String()), bold(repoInfo.DefaultBranch))
-		if !confirm("  Proceed?") {
+		fmt.Printf("\n%s This will rewrite %s in %s\n",
+			boldRed("⚠"), bold(fmt.Sprintf("%d commit(s)", len(results))), bold(target.String()))
+		if !confirm("  Rewrite?") {
 			rpt.SetResult("aborted", 0)
 			_ = rpt.Save()
 			fmt.Printf("\n%s Aborted.\n", red("✗"))
 			return
 		}
 	}
-
-	originalRefs, _ := rewriter.GetBranchRefs(repoPath)
-	rpt.SetOriginalRefs(originalRefs)
 
 	fmt.Printf("\n%s Rewriting commit messages...\n", cyan("::"))
 	if err := rewriter.Rewrite(repoPath); err != nil {
@@ -512,24 +534,38 @@ func runRemoteRepoWithTarget(target *remote.Target) {
 
 	afterRefs, _ := rewriter.GetBranchRefs(repoPath)
 	rpt.SetAfterRefs(afterRefs)
+	rpt.SetResult("cleaned", len(results))
 
-	fmt.Printf("%s Pushing to %s...\n", cyan("::"), bold(target.String()))
+	fmt.Printf("\n%s Cleaned %s\n", green("✓"), bold(fmt.Sprintf("%d commit(s)", len(results))))
+
+	// Push confirmation
+	changed := rewriter.ChangedBranches(originalRefs, afterRefs)
+	if len(changed) == 0 {
+		_ = rpt.Save()
+		return
+	}
+
+	fmt.Printf("\n%s Force-push to %s?\n", boldRed("⚠"), bold(target.String()))
+	fmt.Printf("  Branches: %s\n", cyan(strings.Join(changed, ", ")))
+
+	if !confirmDangerous("  ") {
+		_ = rpt.Save()
+		fmt.Printf("\n%s Push skipped. Rewrite was applied locally in temp clone only.\n", yellow("→"))
+		return
+	}
+
+	fmt.Printf("\n%s Pushing to %s...\n", cyan("::"), bold(target.String()))
 	if err := github.PushForce(repoPath, repoInfo.DefaultBranch); err != nil {
 		rpt.SetPushError(err.Error())
-		rpt.SetResult("cleaned", len(results))
 		_ = rpt.Save()
 		fmt.Fprintf(os.Stderr, "%s Push failed: %v\n", red("Error:"), err)
 		return
 	}
 
 	rpt.SetPushed()
-	rpt.SetResult("cleaned", len(results))
 	_ = rpt.Save()
-
-	fmt.Printf("\n%s Cleaned and pushed %s in %s\n",
-		green("✓"),
-		bold(fmt.Sprintf("%d commit(s)", len(results))),
-		bold(target.String()))
+	fmt.Printf("\n%s Pushed %s to %s\n",
+		green("✓"), bold(strings.Join(changed, ", ")), bold(target.String()))
 }
 
 func runRemotePR() {
@@ -611,7 +647,7 @@ func runRemotePRWithTarget(target *remote.Target) {
 		status := "dry_run"
 		rpt.SetResult(status, 0)
 		_ = rpt.Save()
-		fmt.Printf("\n%s Report tracked %s\n", dim("→"), dim(rpt.ID))
+		fmt.Printf("\n%s Report tracked %s\n", dim("→"), boldCyan(rpt.ID))
 		if !flags.apply {
 			fmt.Printf("\n%s This was a scan-only run. To rewrite and push, add %s\n", yellow("Note:"), cyan("--apply"))
 		} else {
@@ -621,19 +657,19 @@ func runRemotePRWithTarget(target *remote.Target) {
 	}
 
 	// Apply: rewrite + push PR branch
+	originalRefs, _ := rewriter.GetBranchRefs(repoPath)
+	rpt.SetOriginalRefs(originalRefs)
+
 	if !flags.force {
-		fmt.Printf("\n%s This will rewrite and force-push branch %s for PR #%d\n",
-			boldRed("⚠"), cyan(prInfo.HeadBranch), prInfo.Number)
-		if !confirm("  Proceed?") {
+		fmt.Printf("\n%s This will rewrite %s in PR #%d\n",
+			boldRed("⚠"), bold(fmt.Sprintf("%d commit(s)", len(results))), prInfo.Number)
+		if !confirm("  Rewrite?") {
 			rpt.SetResult("aborted", 0)
 			_ = rpt.Save()
 			fmt.Printf("\n%s Aborted.\n", red("✗"))
 			return
 		}
 	}
-
-	originalRefs, _ := rewriter.GetBranchRefs(repoPath)
-	rpt.SetOriginalRefs(originalRefs)
 
 	fmt.Printf("\n%s Rewriting commit messages...\n", cyan("::"))
 	if err := rewriter.Rewrite(repoPath); err != nil {
@@ -643,22 +679,32 @@ func runRemotePRWithTarget(target *remote.Target) {
 
 	afterRefs, _ := rewriter.GetBranchRefs(repoPath)
 	rpt.SetAfterRefs(afterRefs)
+	rpt.SetResult("cleaned", len(results))
 
-	fmt.Printf("%s Pushing branch %s...\n", cyan("::"), cyan(prInfo.HeadBranch))
+	fmt.Printf("\n%s Cleaned %s\n", green("✓"), bold(fmt.Sprintf("%d commit(s)", len(results))))
+
+	// Push confirmation
+	fmt.Printf("\n%s Force-push branch %s for PR #%d?\n",
+		boldRed("⚠"), cyan(prInfo.HeadBranch), prInfo.Number)
+
+	if !confirmDangerous("  ") {
+		_ = rpt.Save()
+		fmt.Printf("\n%s Push skipped. Rewrite was applied locally in temp clone only.\n", yellow("→"))
+		return
+	}
+
+	fmt.Printf("\n%s Pushing branch %s...\n", cyan("::"), cyan(prInfo.HeadBranch))
 	if err := github.PushForce(repoPath, prInfo.HeadBranch); err != nil {
 		rpt.SetPushError(err.Error())
-		rpt.SetResult("cleaned", len(results))
 		_ = rpt.Save()
 		fmt.Fprintf(os.Stderr, "%s Push failed: %v\n", red("Error:"), err)
 		return
 	}
 
 	rpt.SetPushed()
-	rpt.SetResult("cleaned", len(results))
 	_ = rpt.Save()
-
-	fmt.Printf("\n%s Cleaned and pushed PR #%d (%s)\n",
-		green("✓"), prInfo.Number, bold(fmt.Sprintf("%d commit(s)", len(results))))
+	fmt.Printf("\n%s Pushed branch %s for PR #%d\n",
+		green("✓"), cyan(prInfo.HeadBranch), prInfo.Number)
 }
 
 func runRemoteOrg() {
@@ -837,16 +883,27 @@ func printScanResults(scan *scanner.ScanOutput, results []scanner.Result) {
 		bold(fmt.Sprintf("%d commit(s) co-authored by Claude", len(results))),
 		dim(fmt.Sprintf("%d total commits", scan.TotalCommits)))
 
+	printBranchesAndCommits(scan, results)
+}
+
+func printBranchesAndCommits(scan *scanner.ScanOutput, results []scanner.Result) {
 	fmt.Printf("\n%s\n", bold("Branches:"))
 	for _, bs := range scan.BranchSummaries {
-		fmt.Printf("  %s %s  %s\n",
+		branchStat := formatDiffStat(bs.Insertions, bs.Deletions)
+		fmt.Printf("  %s %s  %s%s\n",
 			cyan("→"),
 			bold(bs.Branch),
-			dim(fmt.Sprintf("(%d commit(s))", bs.Count)))
+			dim(fmt.Sprintf("(%d commit(s))", bs.Count)),
+			branchStat)
 		for model, count := range bs.Models {
-			fmt.Printf("      %s  %s\n",
+			modelStat := ""
+			if ms, ok := bs.ModelStats[model]; ok {
+				modelStat = formatDiffStat(ms.Insertions, ms.Deletions)
+			}
+			fmt.Printf("      %s  %s%s\n",
 				yellow(model),
-				dim(fmt.Sprintf("× %d", count)))
+				dim(fmt.Sprintf("× %d", count)),
+				modelStat)
 		}
 	}
 
@@ -860,11 +917,26 @@ func printScanResults(scan *scanner.ScanOutput, results []scanner.Result) {
 		if r.Model != "" {
 			modelTag = dim(" (" + r.Model + ")")
 		}
-		fmt.Printf("  %s %s%s\n", dim(r.Hash[:8]), r.Subject, modelTag)
+		stat := formatDiffStat(r.Insertions, r.Deletions)
+		fmt.Printf("  %s %s%s%s\n", dim(r.Hash[:8]), r.Subject, modelTag, stat)
 	}
 	if len(results) > 10 {
 		fmt.Printf("  %s\n", dim(fmt.Sprintf("... and %d more", len(results)-10)))
 	}
+}
+
+func formatDiffStat(ins, del int) string {
+	if ins == 0 && del == 0 {
+		return ""
+	}
+	parts := []string{}
+	if ins > 0 {
+		parts = append(parts, green(fmt.Sprintf("+%d", ins)))
+	}
+	if del > 0 {
+		parts = append(parts, red(fmt.Sprintf("-%d", del)))
+	}
+	return " " + strings.Join(parts, dim("/"))
 }
 
 func firstLine(s string) string {

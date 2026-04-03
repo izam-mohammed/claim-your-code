@@ -1,6 +1,10 @@
 package scanner
 
 import (
+	"fmt"
+	"os/exec"
+	"strings"
+
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -9,17 +13,30 @@ import (
 
 // Result represents a commit that contains a Claude co-author line.
 type Result struct {
-	Hash     string
-	Subject  string // First line of the commit message
-	Model    string // e.g. "Claude Opus 4.6"
-	Branches []string
+	Hash         string
+	Subject      string // First line of the commit message
+	Model        string // e.g. "Claude Opus 4.6"
+	Branches     []string
+	FilesChanged int
+	Insertions   int
+	Deletions    int
+}
+
+// ModelStat holds count and diff stats for a single model.
+type ModelStat struct {
+	Count      int
+	Insertions int
+	Deletions  int
 }
 
 // BranchSummary holds per-branch stats.
 type BranchSummary struct {
-	Branch string
-	Count  int
-	Models map[string]int // model name -> count
+	Branch     string
+	Count      int
+	Models     map[string]int       // model name -> count
+	ModelStats map[string]*ModelStat // model name -> diff stats
+	Insertions int
+	Deletions  int
 }
 
 // ScanOutput holds the complete scan results.
@@ -105,32 +122,108 @@ func Scan(repoPath string) (*ScanOutput, error) {
 		return nil, err
 	}
 
-	// Build per-branch summary
+	output := &ScanOutput{
+		Results:      results,
+		TotalCommits: totalCommits,
+	}
+
+	// Enrich with diff stats before building branch summaries
+	enrichDiffStats(repoPath, output)
+
+	// Build per-branch summary (after enrichment so stats are available)
 	branchStats := map[string]*BranchSummary{}
-	for _, r := range results {
+	for _, r := range output.Results {
 		for _, b := range r.Branches {
 			bs, ok := branchStats[b]
 			if !ok {
-				bs = &BranchSummary{Branch: b, Models: map[string]int{}}
+				bs = &BranchSummary{Branch: b, Models: map[string]int{}, ModelStats: map[string]*ModelStat{}}
 				branchStats[b] = bs
 			}
 			bs.Count++
+			bs.Insertions += r.Insertions
+			bs.Deletions += r.Deletions
 			if r.Model != "" {
 				bs.Models[r.Model]++
+				ms, ok := bs.ModelStats[r.Model]
+				if !ok {
+					ms = &ModelStat{}
+					bs.ModelStats[r.Model] = ms
+				}
+				ms.Count++
+				ms.Insertions += r.Insertions
+				ms.Deletions += r.Deletions
 			}
 		}
 	}
-
-	var summaries []BranchSummary
 	for _, bs := range branchStats {
-		summaries = append(summaries, *bs)
+		output.BranchSummaries = append(output.BranchSummaries, *bs)
 	}
 
-	return &ScanOutput{
-		Results:         results,
-		BranchSummaries: summaries,
-		TotalCommits:    totalCommits,
-	}, nil
+	return output, nil
+}
+
+// enrichDiffStats shells out to git log --shortstat to get additions/deletions
+// per commit. This is much faster than computing diffs in Go.
+func enrichDiffStats(repoPath string, output *ScanOutput) {
+	if len(output.Results) == 0 {
+		return
+	}
+
+	// Build a set of hashes we care about
+	hashSet := make(map[string]int, len(output.Results))
+	for i, r := range output.Results {
+		hashSet[r.Hash] = i
+	}
+
+	// git log --format=%H --shortstat --all
+	cmd := exec.Command("git", "log", "--format=%H", "--shortstat", "--all")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return // silently skip — stats are optional
+	}
+
+	lines := strings.Split(string(out), "\n")
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if len(line) != 40 {
+			continue
+		}
+		idx, ok := hashSet[line]
+		if !ok {
+			continue
+		}
+		// Next non-empty line should be the shortstat
+		for j := i + 1; j < len(lines) && j <= i+2; j++ {
+			stat := strings.TrimSpace(lines[j])
+			if stat == "" {
+				continue
+			}
+			files, ins, del := parseShortStat(stat)
+			output.Results[idx].FilesChanged = files
+			output.Results[idx].Insertions = ins
+			output.Results[idx].Deletions = del
+			break
+		}
+	}
+}
+
+// parseShortStat parses a git --shortstat line like:
+// " 3 files changed, 12 insertions(+), 4 deletions(-)"
+func parseShortStat(line string) (files, insertions, deletions int) {
+	parts := strings.Split(line, ",")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		var n int
+		if _, err := fmt.Sscanf(p, "%d file", &n); err == nil {
+			files = n
+		} else if _, err := fmt.Sscanf(p, "%d insertion", &n); err == nil {
+			insertions = n
+		} else if _, err := fmt.Sscanf(p, "%d deletion", &n); err == nil {
+			deletions = n
+		}
+	}
+	return
 }
 
 func firstLine(s string) string {

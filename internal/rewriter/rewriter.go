@@ -77,6 +77,50 @@ func Revert(repoPath string, originalRefs map[string]string) error {
 	return nil
 }
 
+// GetRemoteURL returns the URL of the "origin" remote, or empty string if none.
+func GetRemoteURL(repoPath string) string {
+	cmd := exec.Command("git", "remote", "get-url", "origin")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// PushBranches force-pushes only the specified branches to origin.
+// Only pushes branches that were actually rewritten (before != after hash).
+// Uses --force because filter-branch rewrites tracking refs, making --force-with-lease fail.
+func PushBranches(repoPath string, beforeRefs, afterRefs map[string]string) error {
+	for branch, beforeHash := range beforeRefs {
+		afterHash, ok := afterRefs[branch]
+		if !ok || afterHash == beforeHash {
+			continue // skip unchanged branches
+		}
+		// Use explicit old:new ref to push only our known rewrite
+		refspec := fmt.Sprintf("%s:refs/heads/%s", afterHash, branch)
+		cmd := exec.Command("git", "push", "--force", "origin", refspec)
+		cmd.Dir = repoPath
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to push branch %s: %w", branch, err)
+		}
+	}
+	return nil
+}
+
+// ChangedBranches returns branch names where the hash changed between before and after.
+func ChangedBranches(beforeRefs, afterRefs map[string]string) []string {
+	var changed []string
+	for branch, beforeHash := range beforeRefs {
+		if afterHash, ok := afterRefs[branch]; ok && afterHash != beforeHash {
+			changed = append(changed, branch)
+		}
+	}
+	return changed
+}
+
 func splitLines(s string) []string {
 	var lines []string
 	start := 0
