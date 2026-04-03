@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -15,9 +16,8 @@ import (
 )
 
 const (
-	DirName   = ".claim"
-	IDPrefix  = "clm"
-	gitIgnore = ".claim/"
+	IDPrefix = "clm"
+	appName  = "claim"
 )
 
 // Report is the top-level structure persisted to disk.
@@ -61,6 +61,37 @@ type Result struct {
 
 type Reverted struct {
 	RevertedAt time.Time `json:"reverted_at"`
+}
+
+// DataDir returns the OS-standard directory for storing claim reports.
+//   - macOS:   ~/Library/Application Support/claim/reports
+//   - Linux:   $XDG_DATA_HOME/claim/reports (defaults to ~/.local/share/claim/reports)
+//   - Windows: %LocalAppData%/claim/reports
+func DataDir() (string, error) {
+	var base string
+	switch runtime.GOOS {
+	case "darwin":
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(home, "Library", "Application Support")
+	case "windows":
+		base = os.Getenv("LocalAppData")
+		if base == "" {
+			return "", fmt.Errorf("%%LocalAppData%% is not set")
+		}
+	default: // linux, freebsd, etc.
+		base = os.Getenv("XDG_DATA_HOME")
+		if base == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return "", err
+			}
+			base = filepath.Join(home, ".local", "share")
+		}
+	}
+	return filepath.Join(base, appName, "reports"), nil
 }
 
 // generateID creates a short unique ID like "clm_a3f8b1".
@@ -136,13 +167,12 @@ func (r *Report) IsRevertible() bool {
 	return r.Result != nil && r.Result.Status == "cleaned" && r.Reverted == nil && len(r.OriginalRefs) > 0
 }
 
-// Save writes the report as JSON to .claim/<id>.json in the repo root.
-func (r *Report) Save(repoPath string) error {
-	if err := ensureGitignore(repoPath); err != nil {
-		return fmt.Errorf("updating .gitignore: %w", err)
+// Save writes the report as JSON to the centralized data directory.
+func (r *Report) Save() error {
+	dir, err := DataDir()
+	if err != nil {
+		return fmt.Errorf("unable to track report: %w", err)
 	}
-
-	dir := filepath.Join(repoPath, DirName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -154,9 +184,13 @@ func (r *Report) Save(repoPath string) error {
 	return os.WriteFile(filepath.Join(dir, r.ID+".json"), data, 0o644)
 }
 
-// List reads all reports from .claim/ directory, sorted newest first.
+// List reads all reports from the centralized data directory, sorted newest first.
+// If repoPath is non-empty, only reports for that repo are returned.
 func List(repoPath string) ([]*Report, error) {
-	dir := filepath.Join(repoPath, DirName)
+	dir, err := DataDir()
+	if err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -174,6 +208,9 @@ func List(repoPath string) ([]*Report, error) {
 		if err != nil {
 			continue
 		}
+		if repoPath != "" && rpt.Repo != repoPath {
+			continue
+		}
 		reports = append(reports, rpt)
 	}
 
@@ -184,12 +221,22 @@ func List(repoPath string) ([]*Report, error) {
 	return reports, nil
 }
 
-// Load reads a single report by ID from .claim/<id>.json.
-func Load(repoPath, id string) (*Report, error) {
-	return loadFile(filepath.Join(repoPath, DirName, id+".json"))
+// ListAll reads all reports regardless of repo, sorted newest first.
+func ListAll() ([]*Report, error) {
+	return List("")
+}
+
+// Load reads a single report by ID.
+func Load(id string) (*Report, error) {
+	dir, err := DataDir()
+	if err != nil {
+		return nil, err
+	}
+	return loadFile(filepath.Join(dir, id+".json"))
 }
 
 // FindByPrefix finds a report whose ID starts with the given prefix.
+// If repoPath is non-empty, only reports for that repo are searched.
 func FindByPrefix(repoPath, prefix string) (*Report, error) {
 	reports, err := List(repoPath)
 	if err != nil {
@@ -223,37 +270,4 @@ func loadFile(path string) (*Report, error) {
 		return nil, err
 	}
 	return &r, nil
-}
-
-// ensureGitignore adds .claim/ to .gitignore if not already present.
-func ensureGitignore(repoPath string) error {
-	gitignorePath := filepath.Join(repoPath, ".gitignore")
-
-	content, err := os.ReadFile(gitignorePath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
-	// Check if already ignored
-	for _, line := range strings.Split(string(content), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == gitIgnore || trimmed == ".claim" {
-			return nil
-		}
-	}
-
-	f, err := os.OpenFile(gitignorePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if len(content) > 0 && content[len(content)-1] != '\n' {
-		if _, err := f.WriteString("\n"); err != nil {
-			return err
-		}
-	}
-
-	_, err = f.WriteString(gitIgnore + "\n")
-	return err
 }

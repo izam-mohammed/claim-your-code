@@ -85,7 +85,7 @@ func PrintList(reports []*Report) {
 			revertTag)
 	}
 
-	fmt.Printf("\n%s Run %s to see details\n", dim("→"), cyan("claim report <folder> <id>"))
+	fmt.Printf("\n%s Run %s to see details\n", dim("→"), cyan("claim report <id>"))
 }
 
 // PrintDetail displays a single report with full details.
@@ -98,6 +98,7 @@ func PrintDetail(r *Report) {
 
 	// Meta
 	fmt.Printf("  %s  %s\n", dim("ID:"), boldCyan(r.ID))
+	fmt.Printf("  %s  %s\n", dim("Repo:"), bold(r.Repo))
 	fmt.Printf("  %s  %s\n", dim("Date:"), r.CreatedAt.Local().Format("2006-01-02 15:04:05"))
 	fmt.Printf("  %s  %s\n", dim("Tool:"), fmt.Sprintf("claim %s", r.Version))
 
@@ -182,7 +183,7 @@ func PrintDetail(r *Report) {
 		fmt.Printf("  %s  %s\n", dim("Reverted at:"), r.Reverted.RevertedAt.Local().Format("2006-01-02 15:04:05"))
 	} else if r.IsRevertible() {
 		fmt.Println()
-		fmt.Printf("  %s  Revert with: %s\n", dim("↩"), cyan(fmt.Sprintf("claim revert <folder> %s", r.ID)))
+		fmt.Printf("  %s  Revert with: %s\n", dim("↩"), cyan(fmt.Sprintf("claim revert %s", r.ID)))
 	}
 
 	fmt.Println()

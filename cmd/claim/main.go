@@ -65,11 +65,11 @@ func printUsage() {
 
 %s
   claim <folder>               Scan and clean git repositories
-  claim report <folder>        List all claim reports
-  claim report <folder> <id>   Show a specific report in detail
-  claim report <folder> all    Show all reports in detail
-  claim revert <folder>        Revert the most recent clean
-  claim revert <folder> <id>   Revert a specific clean by report ID
+  claim report                 List all claim reports
+  claim report <folder>        List reports for a specific folder
+  claim report <id>            Show a specific report in detail
+  claim report all             Show all reports in detail
+  claim revert <id>            Revert a specific clean by report ID
   claim --version              Show version
   claim --help                 Show this help
 
@@ -276,10 +276,10 @@ func claimRepo(repoPath string, dryRun, force bool) {
 
 	if dryRun {
 		rpt.SetResult("dry_run", 0)
-		if err := rpt.Save(repoPath); err != nil {
-			fmt.Fprintf(os.Stderr, "%s Failed to save report: %v\n", yellow("Warning:"), err)
+		if err := rpt.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "%s Failed to record report: %v\n", yellow("Warning:"), err)
 		} else {
-			fmt.Printf("\n%s Report saved %s\n", dim("→"), dim(rpt.ID))
+			fmt.Printf("\n%s Report tracked %s\n", dim("→"), dim(rpt.ID))
 		}
 		fmt.Printf("\n%s No changes made.\n", yellow("--dry-run:"))
 		return
@@ -292,8 +292,8 @@ func claimRepo(repoPath string, dryRun, force bool) {
 			bold(repoName))
 		if !confirm("  Proceed?") {
 			rpt.SetResult("aborted", 0)
-			if err := rpt.Save(repoPath); err != nil {
-				fmt.Fprintf(os.Stderr, "%s Failed to save report: %v\n", yellow("Warning:"), err)
+			if err := rpt.Save(); err != nil {
+				fmt.Fprintf(os.Stderr, "%s Failed to record report: %v\n", yellow("Warning:"), err)
 			}
 			fmt.Printf("\n%s Aborted.\n", red("✗"))
 			return
@@ -314,10 +314,10 @@ func claimRepo(repoPath string, dryRun, force bool) {
 	}
 
 	rpt.SetResult("cleaned", len(results))
-	if err := rpt.Save(repoPath); err != nil {
-		fmt.Fprintf(os.Stderr, "%s Failed to save report: %v\n", yellow("Warning:"), err)
+	if err := rpt.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s Failed to record report: %v\n", yellow("Warning:"), err)
 	} else {
-		fmt.Printf("\n%s Report saved %s\n", dim("→"), dim(rpt.ID))
+		fmt.Printf("\n%s Report tracked %s\n", dim("→"), dim(rpt.ID))
 	}
 
 	fmt.Printf("\n%s Cleaned %s\n",
@@ -330,64 +330,52 @@ func claimRepo(repoPath string, dryRun, force bool) {
 // --- REPORT ---
 
 func runReport() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "%s Usage: claim report <folder> [id|all]\n", red("Error:"))
-		os.Exit(1)
-	}
-
-	folder := os.Args[2]
-	absPath, err := filepath.Abs(folder)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
-		os.Exit(1)
-	}
-
+	// Usage: claim report [folder] [id|all]
+	// folder is optional — if omitted, lists all reports globally.
 	idArg := ""
-	if len(os.Args) >= 4 {
-		idArg = os.Args[3]
-	}
+	repoFilter := ""
 
-	// Find all repos in the path
-	var repos []string
-	if discover.IsGitRepo(absPath) {
-		repos = []string{absPath}
-		// Also include nested repos that have .claim/ dirs
-		nested := discover.FindNestedRepos(absPath)
-		for _, n := range nested {
-			if hasClaimDir(n.Path) {
-				repos = append(repos, n.Path)
-			}
+	switch {
+	case len(os.Args) >= 4:
+		// claim report <folder> <id|all>
+		folder := os.Args[2]
+		absPath, err := filepath.Abs(folder)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
+			os.Exit(1)
 		}
-	} else {
-		found := discover.FindRepos(absPath, 4)
-		for _, r := range found {
-			if hasClaimDir(r.Path) {
-				repos = append(repos, r.Path)
+		repoFilter = absPath
+		idArg = os.Args[3]
+	case len(os.Args) == 3:
+		// claim report <folder-or-id>
+		arg := os.Args[2]
+		// If it looks like an ID prefix (starts with "clm" or "all"), treat it as such
+		if arg == "all" || strings.HasPrefix(arg, report.IDPrefix) {
+			idArg = arg
+		} else {
+			absPath, err := filepath.Abs(arg)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
+				os.Exit(1)
 			}
+			repoFilter = absPath
 		}
 	}
 
 	if idArg != "" && idArg != "all" {
-		// Specific ID — search across all repos
-		for _, repoPath := range repos {
-			rpt, err := report.FindByPrefix(repoPath, idArg)
-			if err == nil {
-				report.PrintDetail(rpt)
-				return
-			}
+		rpt, err := report.FindByPrefix(repoFilter, idArg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
+			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "%s No report found matching '%s'\n", red("Error:"), idArg)
-		os.Exit(1)
+		report.PrintDetail(rpt)
+		return
 	}
 
-	// Collect all reports across repos
-	var allReports []*report.Report
-	for _, repoPath := range repos {
-		reports, err := report.List(repoPath)
-		if err != nil {
-			continue
-		}
-		allReports = append(allReports, reports...)
+	allReports, err := report.List(repoFilter)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
+		os.Exit(1)
 	}
 
 	if idArg == "all" {
@@ -407,78 +395,23 @@ func runReport() {
 	report.PrintList(allReports)
 }
 
-func hasClaimDir(repoPath string) bool {
-	info, err := os.Stat(filepath.Join(repoPath, report.DirName))
-	return err == nil && info.IsDir()
-}
-
 // --- REVERT ---
 
 func runRevert() {
 	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "%s Usage: claim revert <folder> [id]\n", red("Error:"))
+		fmt.Fprintf(os.Stderr, "%s Usage: claim revert <id>\n", red("Error:"))
 		os.Exit(1)
 	}
 
-	folder := os.Args[2]
-	absPath, err := filepath.Abs(folder)
+	idArg := os.Args[2]
+
+	rpt, err := report.FindByPrefix("", idArg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
 		os.Exit(1)
 	}
 
-	idArg := ""
-	if len(os.Args) >= 4 {
-		idArg = os.Args[3]
-	}
-
-	// Find all repos
-	var repos []string
-	if discover.IsGitRepo(absPath) {
-		repos = []string{absPath}
-		nested := discover.FindNestedRepos(absPath)
-		for _, n := range nested {
-			if hasClaimDir(n.Path) {
-				repos = append(repos, n.Path)
-			}
-		}
-	} else {
-		found := discover.FindRepos(absPath, 4)
-		for _, r := range found {
-			if hasClaimDir(r.Path) {
-				repos = append(repos, r.Path)
-			}
-		}
-	}
-
-	if idArg != "" {
-		// Specific ID — find across repos
-		for _, repoPath := range repos {
-			rpt, err := report.FindByPrefix(repoPath, idArg)
-			if err == nil {
-				revertReport(repoPath, rpt)
-				return
-			}
-		}
-		fmt.Fprintf(os.Stderr, "%s No report found matching '%s'\n", red("Error:"), idArg)
-		os.Exit(1)
-	}
-
-	// No ID — find most recent revertible across all repos
-	for _, repoPath := range repos {
-		reports, err := report.List(repoPath)
-		if err != nil {
-			continue
-		}
-		for _, r := range reports {
-			if r.IsRevertible() {
-				revertReport(repoPath, r)
-				return
-			}
-		}
-	}
-
-	fmt.Printf("%s No revertible claims found.\n", yellow("!"))
+	revertReport(rpt.Repo, rpt)
 }
 
 func revertReport(repoPath string, rpt *report.Report) {
@@ -488,7 +421,7 @@ func revertReport(repoPath string, rpt *report.Report) {
 		} else if rpt.Result == nil || rpt.Result.Status != "cleaned" {
 			fmt.Fprintf(os.Stderr, "%s Report %s was not a successful clean (status: %s).\n", red("Error:"), cyan(rpt.ID), rpt.Result.Status)
 		} else {
-			fmt.Fprintf(os.Stderr, "%s Report %s has no stored branch refs to revert to.\n", red("Error:"), cyan(rpt.ID))
+			fmt.Fprintf(os.Stderr, "%s Report %s has no branch refs to revert to.\n", red("Error:"), cyan(rpt.ID))
 		}
 		os.Exit(1)
 	}
@@ -516,8 +449,8 @@ func revertReport(repoPath string, rpt *report.Report) {
 	}
 
 	rpt.SetReverted()
-	if err := rpt.Save(repoPath); err != nil {
-		fmt.Fprintf(os.Stderr, "%s Failed to update report: %v\n", yellow("Warning:"), err)
+	if err := rpt.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s Failed to record revert: %v\n", yellow("Warning:"), err)
 	}
 
 	fmt.Printf("\n%s Reverted %s — Co-Authored-By lines are back.\n", green("✓"), boldCyan(rpt.ID))
