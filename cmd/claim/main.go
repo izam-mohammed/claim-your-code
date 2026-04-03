@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/izam-mohammed/claim-your-code/internal/discover"
 	"github.com/izam-mohammed/claim-your-code/internal/filter"
 	"github.com/izam-mohammed/claim-your-code/internal/report"
 	"github.com/izam-mohammed/claim-your-code/internal/rewriter"
@@ -27,6 +28,15 @@ var (
 	boldRed  = color.New(color.Bold, color.FgRed).SprintFunc()
 	boldCyan = color.New(color.Bold, color.FgCyan).SprintFunc()
 )
+
+var stdinReader = bufio.NewReader(os.Stdin)
+
+func confirm(prompt string) bool {
+	fmt.Printf("%s %s ", prompt, dim("[y/N]"))
+	answer, _ := stdinReader.ReadString('\n')
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	return answer == "y" || answer == "yes"
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -54,7 +64,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, `%s - Strip Co-Authored-By: Claude lines from git commits
 
 %s
-  claim <folder>               Scan and clean a git repository
+  claim <folder>               Scan and clean git repositories
   claim report <folder>        List all claim reports
   claim report <folder> <id>   Show a specific report in detail
   claim report <folder> all    Show all reports in detail
@@ -66,7 +76,11 @@ func printUsage() {
 %s
   --dry-run          Show what would be changed without modifying anything
   --force            Skip confirmation prompt
-`, bold("claim"), bold("Usage:"), bold("Flags:"))
+
+%s
+  If <folder> is not a git repo, claim searches for repos inside it.
+  Nested repos inside a git repo are detected and offered for scanning.
+`, bold("claim"), bold("Usage:"), bold("Flags:"), bold("Discovery:"))
 }
 
 func runFilterMsg() {
@@ -78,153 +92,96 @@ func runFilterMsg() {
 	fmt.Print(filter.StripClaudeCoAuthor(string(input)))
 }
 
-func runReport() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "%s Usage: claim report <folder> [id|all]\n", red("Error:"))
-		os.Exit(1)
-	}
+// resolveRepos takes a folder path and returns the list of repo paths to process.
+// If the folder is a git repo, it returns that repo (and optionally nested repos).
+// If not, it searches for repos inside.
+func resolveRepos(absPath string, force bool) []string {
+	if discover.IsGitRepo(absPath) {
+		repos := []string{absPath}
 
-	folder := os.Args[2]
-	absPath, err := filepath.Abs(folder)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
-		os.Exit(1)
-	}
-
-	// No ID given → list all reports
-	if len(os.Args) < 4 {
-		reports, err := report.List(absPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
-			os.Exit(1)
-		}
-		report.PrintList(reports)
-		return
-	}
-
-	idArg := os.Args[3]
-
-	// "all" → show every report in detail
-	if idArg == "all" {
-		reports, err := report.List(absPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
-			os.Exit(1)
-		}
-		if len(reports) == 0 {
-			fmt.Printf("\n%s No claim reports found.\n", dim("→"))
-			return
-		}
-		for i, r := range reports {
-			if i > 0 {
-				fmt.Println(dim("  ─────────────────────────────────────────"))
+		// Check for nested repos one level deep
+		nested := discover.FindNestedRepos(absPath)
+		if len(nested) > 0 {
+			fmt.Printf("\n%s Found %s inside %s:\n",
+				yellow("!"),
+				bold(fmt.Sprintf("%d nested repo(s)", len(nested))),
+				bold(filepath.Base(absPath)))
+			for _, r := range nested {
+				fmt.Printf("  %s %s\n", cyan("→"), r.Name)
 			}
-			report.PrintDetail(r)
-		}
-		return
-	}
-
-	// Specific ID (or prefix)
-	rpt, err := report.FindByPrefix(absPath, idArg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
-		os.Exit(1)
-	}
-	report.PrintDetail(rpt)
-}
-
-func runRevert() {
-	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "%s Usage: claim revert <folder> [id]\n", red("Error:"))
-		os.Exit(1)
-	}
-
-	folder := os.Args[2]
-	absPath, err := filepath.Abs(folder)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
-		os.Exit(1)
-	}
-
-	var rpt *report.Report
-
-	if len(os.Args) >= 4 {
-		// Specific ID
-		rpt, err = report.FindByPrefix(absPath, os.Args[3])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
-			os.Exit(1)
-		}
-	} else {
-		// Find most recent revertible report
-		reports, err := report.List(absPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
-			os.Exit(1)
-		}
-		for _, r := range reports {
-			if r.IsRevertible() {
-				rpt = r
-				break
+			if force || confirm("\n  Include nested repos?") {
+				for _, r := range nested {
+					repos = append(repos, r.Path)
+				}
 			}
 		}
-		if rpt == nil {
-			fmt.Printf("%s No revertible claims found.\n", yellow("!"))
-			return
-		}
+
+		return repos
 	}
 
-	if !rpt.IsRevertible() {
-		if rpt.Reverted != nil {
-			fmt.Fprintf(os.Stderr, "%s Report %s has already been reverted.\n", red("Error:"), cyan(rpt.ID))
-		} else if rpt.Result == nil || rpt.Result.Status != "cleaned" {
-			fmt.Fprintf(os.Stderr, "%s Report %s was not a successful clean (status: %s).\n", red("Error:"), cyan(rpt.ID), rpt.Result.Status)
-		} else {
-			fmt.Fprintf(os.Stderr, "%s Report %s has no stored branch refs to revert to.\n", red("Error:"), cyan(rpt.ID))
-		}
+	// Not a git repo — search for repos inside
+	fmt.Printf("%s No .git found in %s, searching for repositories...\n", cyan("::"), bold(filepath.Base(absPath)))
+	found := discover.FindRepos(absPath, 4) // search up to 4 levels deep
+
+	if len(found) == 0 {
+		fmt.Fprintf(os.Stderr, "%s No git repositories found in '%s'\n", red("Error:"), absPath)
 		os.Exit(1)
 	}
 
-	// Show what will be reverted
-	fmt.Printf("\n%s Reverting claim %s\n", cyan("::"), boldCyan(rpt.ID))
-	fmt.Printf("  %s  %s\n", dim("Date:"), rpt.CreatedAt.Local().Format("2006-01-02 15:04:05"))
-	fmt.Printf("  %s  %s\n", dim("Cleaned:"), bold(fmt.Sprintf("%d commit(s)", rpt.Result.Cleaned)))
-	fmt.Println()
-	fmt.Printf("  %s\n", bold("Branches to restore:"))
-	for branch, hash := range rpt.OriginalRefs {
-		fmt.Printf("  %s %s %s %s\n", cyan("→"), bold(branch), dim("→"), dim(hash[:8]))
+	fmt.Printf("\n%s Found %s:\n", green("✓"), bold(fmt.Sprintf("%d repo(s)", len(found))))
+	for i, r := range found {
+		relPath, _ := filepath.Rel(absPath, r.Path)
+		if relPath == "" {
+			relPath = r.Path
+		}
+		fmt.Printf("  %s %s  %s\n", cyan(fmt.Sprintf("[%d]", i+1)), bold(r.Name), dim(relPath))
 	}
 
-	// Confirm
-	fmt.Printf("\n%s This will restore branches to their pre-claim state.\n", boldRed("⚠"))
-	fmt.Printf("  Proceed? %s ", dim("[y/N]"))
+	if !force {
+		fmt.Printf("\n  Process all? %s ", dim("[y/N/numbers e.g. 1,3]"))
+		answer, _ := stdinReader.ReadString('\n')
+		answer = strings.TrimSpace(strings.ToLower(answer))
 
-	reader := bufio.NewReader(os.Stdin)
-	answer, _ := reader.ReadString('\n')
-	answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer == "" || answer == "n" || answer == "no" {
+			fmt.Printf("\n%s Aborted.\n", red("✗"))
+			os.Exit(0)
+		}
 
-	if answer != "y" && answer != "yes" {
-		fmt.Printf("\n%s Aborted.\n", red("✗"))
-		return
+		if answer != "y" && answer != "yes" && answer != "all" {
+			// Parse number selection like "1,3" or "1 3"
+			return parseSelection(answer, found)
+		}
 	}
 
-	// Perform revert
-	fmt.Printf("\n%s Restoring branches...\n", cyan("::"))
-	if err := rewriter.Revert(absPath, rpt.OriginalRefs); err != nil {
-		fmt.Fprintf(os.Stderr, "\n%s %v\n", red("Error:"), err)
-		os.Exit(1)
+	var paths []string
+	for _, r := range found {
+		paths = append(paths, r.Path)
 	}
-
-	// Mark as reverted and save
-	rpt.SetReverted()
-	if err := rpt.Save(absPath); err != nil {
-		fmt.Fprintf(os.Stderr, "%s Failed to update report: %v\n", yellow("Warning:"), err)
-	}
-
-	fmt.Printf("\n%s Reverted %s — Co-Authored-By lines are back.\n", green("✓"), boldCyan(rpt.ID))
-	fmt.Printf("\n%s If you've already pushed the cleaned version, force-push to restore remote:\n", yellow("Note:"))
-	fmt.Printf("  %s\n", cyan("git push --force-with-lease"))
+	return paths
 }
+
+func parseSelection(input string, repos []discover.Repo) []string {
+	// Replace commas and spaces with a single delimiter
+	input = strings.ReplaceAll(input, ",", " ")
+	parts := strings.Fields(input)
+
+	var paths []string
+	for _, p := range parts {
+		var idx int
+		if _, err := fmt.Sscanf(p, "%d", &idx); err == nil {
+			if idx >= 1 && idx <= len(repos) {
+				paths = append(paths, repos[idx-1].Path)
+			}
+		}
+	}
+	if len(paths) == 0 {
+		fmt.Fprintf(os.Stderr, "%s No valid selection.\n", red("Error:"))
+		os.Exit(1)
+	}
+	return paths
+}
+
+// --- CLAIM ---
 
 func runClaim(folder string) {
 	dryRun := false
@@ -238,44 +195,48 @@ func runClaim(folder string) {
 		}
 	}
 
-	// Resolve to absolute path
 	absPath, err := filepath.Abs(folder)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
 		os.Exit(1)
 	}
 
-	// Check folder exists
 	info, err := os.Stat(absPath)
 	if err != nil || !info.IsDir() {
 		fmt.Fprintf(os.Stderr, "%s '%s' is not a valid directory\n", red("Error:"), folder)
 		os.Exit(1)
 	}
 
-	// Check for .git
-	gitDir := filepath.Join(absPath, ".git")
-	if _, err := os.Stat(gitDir); err != nil {
-		fmt.Fprintf(os.Stderr, "%s '%s' is not a git repository %s\n", red("Error:"), folder, dim("(no .git directory found)"))
-		os.Exit(1)
-	}
+	repos := resolveRepos(absPath, force)
 
-	// Scan for Claude co-author commits
-	fmt.Printf("%s Scanning commits in %s\n", cyan("::"), bold(folder))
-	scan, err := scanner.Scan(absPath)
+	for i, repoPath := range repos {
+		if i > 0 {
+			fmt.Println()
+			fmt.Println(dim("  ═══════════════════════════════════════════"))
+			fmt.Println()
+		}
+		claimRepo(repoPath, dryRun, force)
+	}
+}
+
+func claimRepo(repoPath string, dryRun, force bool) {
+	repoName := filepath.Base(repoPath)
+
+	fmt.Printf("%s Scanning commits in %s\n", cyan("::"), bold(repoName))
+	scan, err := scanner.Scan(repoPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
-		os.Exit(1)
+		return
 	}
 
 	results := scan.Results
 
 	if len(results) == 0 {
-		fmt.Printf("\n%s No Co-Authored-By: Claude lines found. Nothing to do.\n", green("✓"))
+		fmt.Printf("  %s No Co-Authored-By: Claude lines found.\n", green("✓"))
 		return
 	}
 
-	// Build the report
-	rpt := report.Build(version, absPath, scan.TotalCommits, results, scan.BranchSummaries)
+	rpt := report.Build(version, repoPath, scan.TotalCommits, results, scan.BranchSummaries)
 
 	fmt.Printf("\n%s Found %s across %s\n",
 		yellow("!"),
@@ -315,7 +276,7 @@ func runClaim(folder string) {
 
 	if dryRun {
 		rpt.SetResult("dry_run", 0)
-		if err := rpt.Save(absPath); err != nil {
+		if err := rpt.Save(repoPath); err != nil {
 			fmt.Fprintf(os.Stderr, "%s Failed to save report: %v\n", yellow("Warning:"), err)
 		} else {
 			fmt.Printf("\n%s Report saved %s\n", dim("→"), dim(rpt.ID))
@@ -324,20 +285,14 @@ func runClaim(folder string) {
 		return
 	}
 
-	// Confirm before rewriting
 	if !force {
-		fmt.Printf("\n%s This will rewrite git history for %s.\n",
+		fmt.Printf("\n%s This will rewrite git history for %s in %s.\n",
 			boldRed("⚠"),
-			bold(fmt.Sprintf("%d commit(s)", len(results))))
-		fmt.Printf("  Proceed? %s ", dim("[y/N]"))
-
-		reader := bufio.NewReader(os.Stdin)
-		answer, _ := reader.ReadString('\n')
-		answer = strings.TrimSpace(strings.ToLower(answer))
-
-		if answer != "y" && answer != "yes" {
+			bold(fmt.Sprintf("%d commit(s)", len(results))),
+			bold(repoName))
+		if !confirm("  Proceed?") {
 			rpt.SetResult("aborted", 0)
-			if err := rpt.Save(absPath); err != nil {
+			if err := rpt.Save(repoPath); err != nil {
 				fmt.Fprintf(os.Stderr, "%s Failed to save report: %v\n", yellow("Warning:"), err)
 			}
 			fmt.Printf("\n%s Aborted.\n", red("✗"))
@@ -346,20 +301,20 @@ func runClaim(folder string) {
 	}
 
 	// Capture branch refs before rewriting (for revert)
-	originalRefs, err := rewriter.GetBranchRefs(absPath)
+	originalRefs, err := rewriter.GetBranchRefs(repoPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s Failed to capture branch refs: %v\n", yellow("Warning:"), err)
 	}
 	rpt.SetOriginalRefs(originalRefs)
 
 	fmt.Printf("\n%s Rewriting commit messages...\n", cyan("::"))
-	if err := rewriter.Rewrite(absPath); err != nil {
+	if err := rewriter.Rewrite(repoPath); err != nil {
 		fmt.Fprintf(os.Stderr, "\n%s %v\n", red("Error:"), err)
-		os.Exit(1)
+		return
 	}
 
 	rpt.SetResult("cleaned", len(results))
-	if err := rpt.Save(absPath); err != nil {
+	if err := rpt.Save(repoPath); err != nil {
 		fmt.Fprintf(os.Stderr, "%s Failed to save report: %v\n", yellow("Warning:"), err)
 	} else {
 		fmt.Printf("\n%s Report saved %s\n", dim("→"), dim(rpt.ID))
@@ -369,5 +324,203 @@ func runClaim(folder string) {
 		green("✓"),
 		bold(fmt.Sprintf("%d commit(s)", len(results))))
 	fmt.Printf("\n%s If you've already pushed, force-push to update remote:\n", yellow("Note:"))
+	fmt.Printf("  %s\n", cyan("git push --force-with-lease"))
+}
+
+// --- REPORT ---
+
+func runReport() {
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "%s Usage: claim report <folder> [id|all]\n", red("Error:"))
+		os.Exit(1)
+	}
+
+	folder := os.Args[2]
+	absPath, err := filepath.Abs(folder)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
+		os.Exit(1)
+	}
+
+	idArg := ""
+	if len(os.Args) >= 4 {
+		idArg = os.Args[3]
+	}
+
+	// Find all repos in the path
+	var repos []string
+	if discover.IsGitRepo(absPath) {
+		repos = []string{absPath}
+		// Also include nested repos that have .claim/ dirs
+		nested := discover.FindNestedRepos(absPath)
+		for _, n := range nested {
+			if hasClaimDir(n.Path) {
+				repos = append(repos, n.Path)
+			}
+		}
+	} else {
+		found := discover.FindRepos(absPath, 4)
+		for _, r := range found {
+			if hasClaimDir(r.Path) {
+				repos = append(repos, r.Path)
+			}
+		}
+	}
+
+	if idArg != "" && idArg != "all" {
+		// Specific ID — search across all repos
+		for _, repoPath := range repos {
+			rpt, err := report.FindByPrefix(repoPath, idArg)
+			if err == nil {
+				report.PrintDetail(rpt)
+				return
+			}
+		}
+		fmt.Fprintf(os.Stderr, "%s No report found matching '%s'\n", red("Error:"), idArg)
+		os.Exit(1)
+	}
+
+	// Collect all reports across repos
+	var allReports []*report.Report
+	for _, repoPath := range repos {
+		reports, err := report.List(repoPath)
+		if err != nil {
+			continue
+		}
+		allReports = append(allReports, reports...)
+	}
+
+	if idArg == "all" {
+		if len(allReports) == 0 {
+			fmt.Printf("\n%s No claim reports found.\n", dim("→"))
+			return
+		}
+		for i, r := range allReports {
+			if i > 0 {
+				fmt.Println(dim("  ─────────────────────────────────────────"))
+			}
+			report.PrintDetail(r)
+		}
+		return
+	}
+
+	report.PrintList(allReports)
+}
+
+func hasClaimDir(repoPath string) bool {
+	info, err := os.Stat(filepath.Join(repoPath, report.DirName))
+	return err == nil && info.IsDir()
+}
+
+// --- REVERT ---
+
+func runRevert() {
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "%s Usage: claim revert <folder> [id]\n", red("Error:"))
+		os.Exit(1)
+	}
+
+	folder := os.Args[2]
+	absPath, err := filepath.Abs(folder)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
+		os.Exit(1)
+	}
+
+	idArg := ""
+	if len(os.Args) >= 4 {
+		idArg = os.Args[3]
+	}
+
+	// Find all repos
+	var repos []string
+	if discover.IsGitRepo(absPath) {
+		repos = []string{absPath}
+		nested := discover.FindNestedRepos(absPath)
+		for _, n := range nested {
+			if hasClaimDir(n.Path) {
+				repos = append(repos, n.Path)
+			}
+		}
+	} else {
+		found := discover.FindRepos(absPath, 4)
+		for _, r := range found {
+			if hasClaimDir(r.Path) {
+				repos = append(repos, r.Path)
+			}
+		}
+	}
+
+	if idArg != "" {
+		// Specific ID — find across repos
+		for _, repoPath := range repos {
+			rpt, err := report.FindByPrefix(repoPath, idArg)
+			if err == nil {
+				revertReport(repoPath, rpt)
+				return
+			}
+		}
+		fmt.Fprintf(os.Stderr, "%s No report found matching '%s'\n", red("Error:"), idArg)
+		os.Exit(1)
+	}
+
+	// No ID — find most recent revertible across all repos
+	for _, repoPath := range repos {
+		reports, err := report.List(repoPath)
+		if err != nil {
+			continue
+		}
+		for _, r := range reports {
+			if r.IsRevertible() {
+				revertReport(repoPath, r)
+				return
+			}
+		}
+	}
+
+	fmt.Printf("%s No revertible claims found.\n", yellow("!"))
+}
+
+func revertReport(repoPath string, rpt *report.Report) {
+	if !rpt.IsRevertible() {
+		if rpt.Reverted != nil {
+			fmt.Fprintf(os.Stderr, "%s Report %s has already been reverted.\n", red("Error:"), cyan(rpt.ID))
+		} else if rpt.Result == nil || rpt.Result.Status != "cleaned" {
+			fmt.Fprintf(os.Stderr, "%s Report %s was not a successful clean (status: %s).\n", red("Error:"), cyan(rpt.ID), rpt.Result.Status)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s Report %s has no stored branch refs to revert to.\n", red("Error:"), cyan(rpt.ID))
+		}
+		os.Exit(1)
+	}
+
+	repoName := filepath.Base(repoPath)
+	fmt.Printf("\n%s Reverting claim %s in %s\n", cyan("::"), boldCyan(rpt.ID), bold(repoName))
+	fmt.Printf("  %s  %s\n", dim("Date:"), rpt.CreatedAt.Local().Format("2006-01-02 15:04:05"))
+	fmt.Printf("  %s  %s\n", dim("Cleaned:"), bold(fmt.Sprintf("%d commit(s)", rpt.Result.Cleaned)))
+	fmt.Println()
+	fmt.Printf("  %s\n", bold("Branches to restore:"))
+	for branch, hash := range rpt.OriginalRefs {
+		fmt.Printf("  %s %s %s %s\n", cyan("→"), bold(branch), dim("→"), dim(hash[:8]))
+	}
+
+	fmt.Printf("\n%s This will restore branches to their pre-claim state.\n", boldRed("⚠"))
+	if !confirm("  Proceed?") {
+		fmt.Printf("\n%s Aborted.\n", red("✗"))
+		return
+	}
+
+	fmt.Printf("\n%s Restoring branches...\n", cyan("::"))
+	if err := rewriter.Revert(repoPath, rpt.OriginalRefs); err != nil {
+		fmt.Fprintf(os.Stderr, "\n%s %v\n", red("Error:"), err)
+		os.Exit(1)
+	}
+
+	rpt.SetReverted()
+	if err := rpt.Save(repoPath); err != nil {
+		fmt.Fprintf(os.Stderr, "%s Failed to update report: %v\n", yellow("Warning:"), err)
+	}
+
+	fmt.Printf("\n%s Reverted %s — Co-Authored-By lines are back.\n", green("✓"), boldCyan(rpt.ID))
+	fmt.Printf("\n%s If you've already pushed the cleaned version, force-push to restore remote:\n", yellow("Note:"))
 	fmt.Printf("  %s\n", cyan("git push --force-with-lease"))
 }
