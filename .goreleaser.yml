@@ -1,0 +1,60 @@
+version: 2
+
+project_name: claim
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - main: ./cmd/claim
+    binary: claim
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+brews:
+  - repository:
+      owner: izam-mohammed
+      name: homebrew-tap
+    homepage: "https://github.com/izam-mohammed/claim-your-code"
+    description: "Strip Co-Authored-By: Claude lines from git commits"
+    license: "MIT"
+    install: |
+      bin.install "claim"
+    test: |
+      system "#{bin}/claim", "--version"
+
+scoops:
+  - repository:
+      owner: izam-mohammed
+      name: scoop-bucket
+    homepage: "https://github.com/izam-mohammed/claim-your-code"
+    description: "Strip Co-Authored-By: Claude lines from git commits"
+    license: "MIT"
