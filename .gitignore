@@ -14,7 +14,8 @@ dist/
 *.out
 cover.out
 
-# IDE
+# IDE and local tool settings
+.claude/settings.local.json
 .idea/
 .vscode/
 *.swp
