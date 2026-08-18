@@ -10,7 +10,10 @@ import (
 	"strings"
 )
 
-const apiBase = "https://api.github.com"
+var apiBase = "https://api.github.com"
+
+// setAPIBase overrides the API base URL (for testing).
+func setAPIBase(url string) { apiBase = url }
 
 // Client is a lightweight GitHub API client.
 type Client struct {
@@ -23,6 +26,16 @@ func NewClient(token string) *Client {
 	return &Client{token: token, http: http.DefaultClient}
 }
 
+// NewPublicClient creates an unauthenticated client for public repo access.
+func NewPublicClient() *Client {
+	return &Client{token: "", http: http.DefaultClient}
+}
+
+// IsAuthenticated returns true if the client has a token.
+func (c *Client) IsAuthenticated() bool {
+	return c.token != ""
+}
+
 // Token returns the client's auth token (for clone operations).
 func (c *Client) Token() string {
 	return c.token
@@ -33,7 +46,9 @@ func (c *Client) get(path string) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	return c.http.Do(req)
 }
@@ -66,7 +81,9 @@ func (c *Client) getPaginated(path string) ([]json.RawMessage, error) {
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("Authorization", "Bearer "+c.token)
+		if c.token != "" {
+			req.Header.Set("Authorization", "Bearer "+c.token)
+		}
 		req.Header.Set("Accept", "application/vnd.github+json")
 
 		resp, err := c.http.Do(req)
@@ -249,6 +266,16 @@ func (c *Client) GetUser() (*UserInfo, error) {
 	return &user, nil
 }
 
+// IsOrg checks if a name is a GitHub organization (vs a user).
+func (c *Client) IsOrg(name string) bool {
+	resp, err := c.get(fmt.Sprintf("/orgs/%s", name))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == 200
+}
+
 // AuthCloneURL returns a clone URL with the token embedded for authenticated cloning.
 // Format: https://x-access-token:{token}@github.com/owner/repo.git
 func (c *Client) AuthCloneURL(owner, repo string) string {
@@ -256,16 +283,20 @@ func (c *Client) AuthCloneURL(owner, repo string) string {
 }
 
 // StripTokenFromURL removes embedded tokens from clone URLs.
-func StripTokenFromURL(url string) string {
+func StripTokenFromURL(rawURL string) string {
 	// https://x-access-token:TOKEN@github.com/... → https://github.com/...
-	if idx := strings.Index(url, "@github.com"); idx > 0 {
+	// Only strip from HTTP(S) URLs, not SSH URLs
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		return rawURL
+	}
+	if idx := strings.Index(rawURL, "@github.com"); idx > 0 {
 		prefix := "https://"
-		if strings.HasPrefix(url, "http://") {
+		if strings.HasPrefix(rawURL, "http://") {
 			prefix = "http://"
 		}
-		return prefix + "github.com" + url[idx+len("@github.com"):]
+		return prefix + "github.com" + rawURL[idx+len("@github.com"):]
 	}
-	return url
+	return rawURL
 }
 
 // ParseRateLimit extracts rate limit info from response headers.
