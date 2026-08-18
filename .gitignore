@@ -1,0 +1,29 @@
+# Binaries
+bin/
+/claim
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build
+dist/
+
+# Test
+*.test
+*.out
+cover.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
