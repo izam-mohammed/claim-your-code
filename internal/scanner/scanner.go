@@ -33,7 +33,7 @@ type ModelStat struct {
 type BranchSummary struct {
 	Branch     string
 	Count      int
-	Models     map[string]int       // model name -> count
+	Models     map[string]int        // model name -> count
 	ModelStats map[string]*ModelStat // model name -> diff stats
 	Insertions int
 	Deletions  int
@@ -46,9 +46,24 @@ type ScanOutput struct {
 	TotalCommits    int
 }
 
-// Scan opens a git repository at repoPath and returns all commits
-// that contain a Claude Co-Authored-By line, along with branch info.
+// ProgressFunc is called with (done, total, label) during scanning.
+type ProgressFunc func(done, total int, label string)
+
+// Scan opens a git repository and scans all branches.
 func Scan(repoPath string) (*ScanOutput, error) {
+	return ScanWithProgress(repoPath, false, nil)
+}
+
+// ScanDefaultBranch opens a git repository and scans only the default (HEAD) branch.
+func ScanDefaultBranch(repoPath string) (*ScanOutput, error) {
+	return ScanWithProgress(repoPath, true, nil)
+}
+
+// ScanWithProgress scans with an optional progress callback.
+func ScanWithProgress(repoPath string, defaultBranchOnly bool, progress ProgressFunc) (*ScanOutput, error) {
+	if progress != nil {
+		progress(0, 0, "opening repository...")
+	}
 	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
 		return nil, err
@@ -58,23 +73,52 @@ func Scan(repoPath string) (*ScanOutput, error) {
 	commitBranches := map[string][]string{}
 	branchTips := map[string]plumbing.Hash{}
 
-	refs, err := repo.References()
-	if err != nil {
-		return nil, err
-	}
-	err = refs.ForEach(func(ref *plumbing.Reference) error {
-		if ref.Name().IsBranch() {
-			branchName := ref.Name().Short()
-			branchTips[branchName] = ref.Hash()
+	if defaultBranchOnly {
+		// Only scan HEAD branch
+		headRef, err := repo.Head()
+		if err != nil {
+			return nil, fmt.Errorf("cannot resolve HEAD: %w", err)
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+		branchName := "HEAD"
+		if headRef.Name().IsBranch() {
+			branchName = headRef.Name().Short()
+		}
+		branchTips[branchName] = headRef.Hash()
+	} else {
+		// All branches (local + remote)
+		refs, err := repo.References()
+		if err != nil {
+			return nil, err
+		}
+		err = refs.ForEach(func(ref *plumbing.Reference) error {
+			name := ref.Name()
+			if name.IsBranch() {
+				branchTips[name.Short()] = ref.Hash()
+			} else if name.IsRemote() {
+				short := name.Short()
+				parts := strings.SplitN(short, "/", 2)
+				if len(parts) == 2 {
+					branchName := parts[1]
+					if _, exists := branchTips[branchName]; !exists {
+						branchTips[branchName] = ref.Hash()
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// For each branch, walk its commits and record membership
+	totalBranches := len(branchTips)
+	branchDone := 0
 	for branchName, tipHash := range branchTips {
+		branchDone++
+		if progress != nil {
+			progress(branchDone, totalBranches, branchName)
+		}
 		iter, err := repo.Log(&git.LogOptions{From: tipHash})
 		if err != nil {
 			continue
@@ -86,8 +130,16 @@ func Scan(repoPath string) (*ScanOutput, error) {
 		})
 	}
 
-	// Scan all commits for Claude co-author
-	iter, err := repo.Log(&git.LogOptions{All: true})
+	// Scan commits
+	var logOpts git.LogOptions
+	if defaultBranchOnly {
+		// Only HEAD branch
+		headRef, _ := repo.Head()
+		logOpts = git.LogOptions{From: headRef.Hash()}
+	} else {
+		logOpts = git.LogOptions{All: true}
+	}
+	iter, err := repo.Log(&logOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +155,10 @@ func Scan(repoPath string) (*ScanOutput, error) {
 		seen[h] = true
 		totalCommits++
 
+		if progress != nil && (totalCommits == 1 || totalCommits%50 == 0) {
+			progress(totalCommits, 0, fmt.Sprintf("%d commits scanned", totalCommits))
+		}
+
 		if pattern.ContainsClaudeCoAuthor(c.Message) {
 			model := pattern.ExtractModelName(c.Message)
 			branches := commitBranches[h]
@@ -111,7 +167,7 @@ func Scan(repoPath string) (*ScanOutput, error) {
 			}
 			results = append(results, Result{
 				Hash:     h,
-				Subject:  firstLine(c.Message),
+				Subject:  pattern.Subject(c.Message),
 				Model:    model,
 				Branches: branches,
 			})
@@ -224,13 +280,4 @@ func parseShortStat(line string) (files, insertions, deletions int) {
 		}
 	}
 	return
-}
-
-func firstLine(s string) string {
-	for i, ch := range s {
-		if ch == '\n' {
-			return s[:i]
-		}
-	}
-	return s
 }

@@ -7,26 +7,44 @@ import (
 	"strings"
 )
 
-// Rewrite uses git filter-branch to strip Claude co-author lines from all commits.
-// It invokes the claim binary's hidden __filter-msg subcommand as the msg-filter.
+// Rewrite rewrites all branches using git filter-branch.
 func Rewrite(repoPath string) error {
+	return RewriteBranches(repoPath, nil)
+}
+
+// RewriteBranches rewrites specific branches, or all if branches is nil/empty.
+func RewriteBranches(repoPath string, branches []string) error {
 	claimBinary, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to find claim binary path: %w", err)
 	}
 
-	cmd := exec.Command("git", "filter-branch", "--force",
+	args := []string{"filter-branch", "--force",
 		"--msg-filter", fmt.Sprintf("%s __filter-msg", claimBinary),
-		"--", "--all",
-	)
+		"--",
+	}
+	if len(branches) == 0 {
+		args = append(args, "--all")
+	} else {
+		// Resolve each branch to its actual ref
+		for _, b := range branches {
+			ref := resolveRef(repoPath, b)
+			args = append(args, ref)
+		}
+	}
+
+	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
 	cmd.Env = append(os.Environ(), "FILTER_BRANCH_SQUELCH_WARNING=1")
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = nil
+	// Let git's native progress show on stderr (terminal)
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
+		fmt.Print("\r\033[K") // clear any progress line
 		return fmt.Errorf("git filter-branch failed: %w", err)
 	}
+	fmt.Print("\r\033[K") // clear git's progress line
 
 	// Clean up backup refs created by filter-branch
 	cleanCmd := exec.Command("git", "for-each-ref", "--format=%(refname)", "refs/original/")
@@ -119,6 +137,27 @@ func ChangedBranches(beforeRefs, afterRefs map[string]string) []string {
 		}
 	}
 	return changed
+}
+
+// resolveRef finds the actual git ref for a branch name.
+// Checks refs/heads/ first, then refs/remotes/origin/.
+func resolveRef(repoPath, branch string) string {
+	// Try local branch
+	localRef := "refs/heads/" + branch
+	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", localRef)
+	cmd.Dir = repoPath
+	if cmd.Run() == nil {
+		return localRef
+	}
+	// Try remote tracking branch
+	remoteRef := "refs/remotes/origin/" + branch
+	cmd = exec.Command("git", "show-ref", "--verify", "--quiet", remoteRef)
+	cmd.Dir = repoPath
+	if cmd.Run() == nil {
+		return remoteRef
+	}
+	// Fallback to local ref path
+	return localRef
 }
 
 func splitLines(s string) []string {
