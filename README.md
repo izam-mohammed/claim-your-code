@@ -66,6 +66,10 @@ claim org my-organization
 claim user some-username
 ```
 
+Multi-repo commands (`org`, `user`) let you pick which repositories to scan and
+whether to scan through the GitHub API (fast, recent commits only) or by cloning
+each one (slower, complete history).
+
 Remote commands default to **scan-only**. Add `--apply` to rewrite and force-push.
 
 ### Example (local)
@@ -136,27 +140,53 @@ $ claim repo izam-mohammed/my-project --apply
 
 ### Reports
 
-Every scan is tracked. View reports with:
+Every scan is recorded, so a clean can be inspected afterwards and undone.
 
 ```sh
-claim report              # list all reports
-claim report <id>         # show details
-claim report all          # show all in detail
-claim revert <id>         # revert a clean
+claim report              # pick from every report
+claim report <id>         # show one in detail
+claim report all          # show every report in detail
+claim report <folder>     # only reports for that repository
+claim revert <id>         # restore the branches a clean rewrote
 ```
+
+A report stores the branch tips from before and after the rewrite, which is what
+`claim revert` restores them to. Reports are encrypted on disk with the same
+machine-derived key as saved accounts.
+
+Reverting only touches your local branches. If you already force-pushed the
+cleaned history, push again to restore the remote.
 
 ## Authentication
 
-For remote commands, `claim` needs a GitHub token. It tries these in order:
+Remote commands need a GitHub token — except for public repositories, which
+`claim` reads without one.
 
-1. **Cached token** from a previous session
-2. **`CLAIM_GITHUB_TOKEN`** environment variable
-3. **`GITHUB_TOKEN`** environment variable
-4. **`gh` CLI** — extracts token from `gh auth token`
-5. **OAuth Device Flow** — opens browser for authorization
-6. **Interactive prompt** — paste a Personal Access Token
+When a token is needed, `claim` gathers every credential it can find and lets
+you pick:
 
-Tokens are cached securely in your OS data directory.
+- accounts you have saved before
+- `CLAIM_GITHUB_TOKEN` and `GITHUB_TOKEN` environment variables
+- the `gh` CLI's session, via `gh auth token`
+
+Each candidate is validated and shown with the account it belongs to, so you can
+tell them apart. There is always an option to add another account, and one to
+continue unauthenticated against public repos only.
+
+With nothing found, you choose how to authenticate:
+
+- **GitHub OAuth** — opens a browser, one click (recommended)
+- **`gh` CLI** — reuses an existing `gh` session
+- **Personal Access Token** — paste one manually
+
+Accounts are saved encrypted with AES-256-GCM, under a key derived from your
+machine, so the store cannot be decrypted if copied elsewhere. Manage saved
+accounts with:
+
+```sh
+claim logout              # pick an account to remove
+claim logout <username>   # remove one directly
+```
 
 ## What it matches
 
