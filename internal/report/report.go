@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/izam-mohammed/claim-your-code/internal/crypt"
 	"github.com/izam-mohammed/claim-your-code/internal/scanner"
 )
 
@@ -50,10 +51,10 @@ type Report struct {
 
 // GitState tracks the git state before/after a rewrite and push status.
 type GitState struct {
-	BeforeRefs map[string]string `json:"before_refs"`            // branch → hash before rewrite
-	AfterRefs  map[string]string `json:"after_refs,omitempty"`   // branch → hash after rewrite
-	PushedAt   *time.Time        `json:"pushed_at,omitempty"`    // when force-pushed
-	PushError  string            `json:"push_error,omitempty"`   // if push failed
+	BeforeRefs map[string]string `json:"before_refs"`          // branch → hash before rewrite
+	AfterRefs  map[string]string `json:"after_refs,omitempty"` // branch → hash after rewrite
+	PushedAt   *time.Time        `json:"pushed_at,omitempty"`  // when force-pushed
+	PushError  string            `json:"push_error,omitempty"` // if push failed
 }
 
 // IsRemote returns true if this report is from a remote GitHub source.
@@ -244,7 +245,7 @@ func (r *Report) GetBeforeRefs() map[string]string {
 	return r.OriginalRefs
 }
 
-// Save writes the report as JSON to the centralized data directory.
+// Save encrypts and writes the report to the centralized data directory.
 func (r *Report) Save() error {
 	dir, err := DataDir()
 	if err != nil {
@@ -254,11 +255,17 @@ func (r *Report) Save() error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(r, "", "  ")
+	data, err := json.Marshal(r)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, r.ID+".json"), data, 0o644)
+
+	encrypted, err := crypt.EncryptBytes(data)
+	if err != nil {
+		return fmt.Errorf("encrypting report: %w", err)
+	}
+
+	return os.WriteFile(filepath.Join(dir, r.ID+".bin"), []byte(encrypted), 0o600)
 }
 
 // List reads all reports from the centralized data directory, sorted newest first.
@@ -278,7 +285,7 @@ func List(repoPath string) ([]*Report, error) {
 
 	var reports []*Report
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() || (!strings.HasSuffix(e.Name(), ".bin") && !strings.HasSuffix(e.Name(), ".json")) {
 			continue
 		}
 		rpt, err := loadFile(filepath.Join(dir, e.Name()))
@@ -309,6 +316,10 @@ func Load(id string) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Try encrypted first, then legacy plain JSON
+	if rpt, err := loadFile(filepath.Join(dir, id+".bin")); err == nil {
+		return rpt, nil
+	}
 	return loadFile(filepath.Join(dir, id+".json"))
 }
 
@@ -338,10 +349,25 @@ func FindByPrefix(repoPath, prefix string) (*Report, error) {
 }
 
 func loadFile(path string) (*Report, error) {
-	data, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+
+	var data []byte
+
+	// Try decrypting (.bin files)
+	if strings.HasSuffix(path, ".bin") {
+		decrypted, err := crypt.DecryptBytes(string(raw))
+		if err != nil {
+			return nil, fmt.Errorf("decrypting report: %w", err)
+		}
+		data = decrypted
+	} else {
+		// Legacy plain JSON (.json files) — still supported for reading
+		data = raw
+	}
+
 	var r Report
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, err

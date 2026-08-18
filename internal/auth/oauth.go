@@ -7,13 +7,14 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/fatih/color"
 )
 
 // OAuth App client ID for claim-your-code.
-// This is a public client ID — it's safe to embed in the binary.
-// To use OAuth device flow, register a GitHub OAuth App and put its client ID here.
-// For now, this is a placeholder — OAuth will gracefully fail and fall through to prompt.
-const oauthClientID = ""
+// This is a public client ID — safe to embed in the binary.
+// Registered at: https://github.com/settings/applications
+const oauthClientID = "Ov23liGrayvWtyIWfuvZ"
 
 type deviceCodeResponse struct {
 	DeviceCode      string `json:"device_code"`
@@ -38,10 +39,18 @@ func DeviceFlow() (string, error) {
 	}
 
 	// Step 1: Request device code
-	resp, err := http.PostForm("https://github.com/login/device/code", url.Values{
-		"client_id": {oauthClientID},
-		"scope":     {"repo"},
-	})
+	req, err := http.NewRequest("POST", "https://github.com/login/device/code",
+		strings.NewReader(url.Values{
+			"client_id": {oauthClientID},
+			"scope":     {"repo"},
+		}.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("device code request failed: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("device code request failed: %w", err)
 	}
@@ -52,12 +61,28 @@ func DeviceFlow() (string, error) {
 		return "", fmt.Errorf("failed to parse device code response: %w", err)
 	}
 
-	// Step 2: Show user the code
+	if dcr.DeviceCode == "" || dcr.UserCode == "" {
+		return "", fmt.Errorf("GitHub did not return a device code — is Device Flow enabled on the OAuth App?")
+	}
+
+	// Step 2: Show user the code and open browser
+	cyan := color.New(color.FgCyan).SprintFunc()
+	green := color.New(color.FgGreen).SprintFunc()
+	dim := color.New(color.Faint).SprintFunc()
+	yellowBold := color.New(color.Bold, color.FgYellow).SprintFunc()
+
 	fmt.Println()
-	fmt.Printf("  To authenticate, open this URL in your browser:\n")
-	fmt.Printf("  %s\n\n", dcr.VerificationURI)
-	fmt.Printf("  And enter code: %s\n\n", dcr.UserCode)
-	fmt.Printf("  Waiting for authorization...")
+	fmt.Printf("  Your code: %s\n\n", yellowBold(dcr.UserCode))
+
+	// Auto-open browser
+	if err := OpenBrowser(dcr.VerificationURI); err == nil {
+		fmt.Printf("  %s Browser opened → %s\n", green("✓"), cyan(dcr.VerificationURI))
+	} else {
+		fmt.Printf("  Open this URL in your browser:\n")
+		fmt.Printf("  %s\n", cyan(dcr.VerificationURI))
+	}
+
+	fmt.Printf("\n  %s", dim("Waiting for authorization..."))
 
 	// Step 3: Poll for token
 	interval := dcr.Interval
@@ -74,7 +99,7 @@ func DeviceFlow() (string, error) {
 			continue
 		}
 		if token != "" {
-			fmt.Println(" done!")
+			fmt.Printf(" %s\n", green("done!"))
 			return token, nil
 		}
 	}
@@ -83,47 +108,37 @@ func DeviceFlow() (string, error) {
 }
 
 func pollForToken(deviceCode string) (string, error) {
-	resp, err := http.PostForm("https://github.com/login/oauth/access_token", url.Values{
-		"client_id":   {oauthClientID},
-		"device_code": {deviceCode},
-		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
-	})
+	req, err := http.NewRequest("POST", "https://github.com/login/oauth/access_token",
+		strings.NewReader(url.Values{
+			"client_id":   {oauthClientID},
+			"device_code": {deviceCode},
+			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+		}.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	// GitHub returns form-encoded by default, request JSON
-	body := make([]byte, 4096)
-	n, _ := resp.Body.Read(body)
-	bodyStr := string(body[:n])
-
-	// Try JSON first
 	var tr tokenResponse
-	if err := json.NewDecoder(strings.NewReader(bodyStr)).Decode(&tr); err == nil {
-		if tr.AccessToken != "" {
-			return tr.AccessToken, nil
-		}
-		if tr.Error == "authorization_pending" {
-			return "", nil // keep polling
-		}
-		if tr.Error == "slow_down" {
-			return "", nil // keep polling, interval will be longer
-		}
-		if tr.Error != "" {
-			return "", fmt.Errorf("oauth error: %s", tr.Error)
-		}
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+		return "", err
 	}
 
-	// Try form-encoded
-	values, err := url.ParseQuery(bodyStr)
-	if err == nil {
-		if token := values.Get("access_token"); token != "" {
-			return token, nil
-		}
-		if errVal := values.Get("error"); errVal == "authorization_pending" || errVal == "slow_down" {
-			return "", nil
-		}
+	if tr.AccessToken != "" {
+		return tr.AccessToken, nil
+	}
+	if tr.Error == "authorization_pending" || tr.Error == "slow_down" {
+		return "", nil // keep polling
+	}
+	if tr.Error != "" {
+		return "", fmt.Errorf("oauth error: %s", tr.Error)
 	}
 
 	return "", nil

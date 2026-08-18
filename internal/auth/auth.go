@@ -2,95 +2,364 @@ package auth
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
+
+	"github.com/charmbracelet/huh"
+	"github.com/fatih/color"
 )
 
-// GetToken tries all authentication methods in priority order:
-// 1. Cached token from disk
-// 2. CLAIM_GITHUB_TOKEN env var
-// 3. GITHUB_TOKEN env var
-// 4. gh CLI auth token
-// 5. OAuth 2.0 Device Flow
-// 6. Interactive prompt (paste a PAT)
+var (
+	cyan   = color.New(color.FgCyan).SprintFunc()
+	green  = color.New(color.FgGreen).SprintFunc()
+	yellow = color.New(color.FgYellow).SprintFunc()
+	red    = color.New(color.FgRed).SprintFunc()
+	dim    = color.New(color.Faint).SprintFunc()
+	bold   = color.New(color.Bold).SprintFunc()
+)
+
+type foundToken struct {
+	token  string
+	source string
+	user   string
+}
+
+// GetToken finds or prompts for a GitHub token.
 func GetToken() (string, error) {
-	// 1. Cached token
-	if token, err := LoadCachedToken(); err == nil && token != "" {
-		if ValidateToken(token) == nil {
-			return token, nil
-		}
-		// Cached token is invalid/expired — continue to other methods
-	}
+	var found []foundToken
 
-	// 2. CLAIM_GITHUB_TOKEN env var
-	if token := os.Getenv("CLAIM_GITHUB_TOKEN"); token != "" {
-		if err := ValidateToken(token); err == nil {
-			_ = CacheToken(token, "env")
-			return token, nil
+	// 1. Saved accounts (multi-account store)
+	accounts := LoadAllAccounts()
+	for _, a := range accounts {
+		// EncryptedToken temporarily holds decrypted token from LoadAllAccounts
+		token := a.EncryptedToken
+		if validateAndGetUser(token) != "" {
+			found = append(found, foundToken{token, "saved", a.Username})
 		}
 	}
 
-	// 3. GITHUB_TOKEN env var
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		if err := ValidateToken(token); err == nil {
-			_ = CacheToken(token, "env")
-			return token, nil
+	// 2. Env vars
+	addEnvToken(&found, "CLAIM_GITHUB_TOKEN")
+	addEnvToken(&found, "GITHUB_TOKEN")
+
+	// 3. gh CLI
+	if ghCLIAvailable() {
+		if token, err := ghAuthToken(); err == nil && token != "" {
+			if user := validateAndGetUser(token); user != "" {
+				if !isDuplicate(found, token) {
+					found = append(found, foundToken{token, "gh CLI", user})
+				}
+			}
 		}
 	}
 
-	// 4. gh CLI
-	if token, err := ghAuthToken(); err == nil && token != "" {
-		if ValidateToken(token) == nil {
-			_ = CacheToken(token, "gh")
-			return token, nil
+	// If tokens found, let user pick
+	if len(found) > 0 {
+		options := make([]huh.Option[string], 0, len(found)+2)
+		for i, f := range found {
+			options = append(options, huh.NewOption(
+				fmt.Sprintf("@%s (%s)", f.user, f.source),
+				fmt.Sprintf("found_%d", i),
+			))
+		}
+		options = append(options, huh.NewOption("Add another account", "other"))
+		options = append(options, huh.NewOption("Continue without auth (public repos only)", "public"))
+
+		var choice string
+		err := huh.NewSelect[string]().
+			Title("GitHub account").
+			Options(options...).
+			Value(&choice).
+			Run()
+		if err != nil {
+			return "", fmt.Errorf("cancelled")
+		}
+
+		if choice == "public" {
+			fmt.Printf("  %s Continuing without authentication\n", dim("→"))
+			return "", nil
+		}
+		if choice != "other" {
+			var idx int
+			fmt.Sscanf(choice, "found_%d", &idx)
+			if idx >= 0 && idx < len(found) {
+				f := found[idx]
+				fmt.Printf("  %s Authenticated as %s\n", green("✓"), bold("@"+f.user))
+				return f.token, nil
+			}
 		}
 	}
 
-	// 5. OAuth Device Flow
-	token, err := DeviceFlow()
-	if err == nil && token != "" {
-		_ = CacheToken(token, "oauth")
+	// No accounts or user wants to add another
+	return promptForAuth()
+}
+
+func addEnvToken(found *[]foundToken, envVar string) {
+	token := os.Getenv(envVar)
+	if token == "" {
+		return
+	}
+	if user := validateAndGetUser(token); user != "" {
+		if !isDuplicate(*found, token) {
+			*found = append(*found, foundToken{token, envVar, user})
+		}
+	}
+}
+
+func isDuplicate(found []foundToken, token string) bool {
+	for _, f := range found {
+		if f.token == token {
+			return true
+		}
+	}
+	return false
+}
+
+// promptForAuth shows the interactive method selection and saves the account.
+func promptForAuth() (string, error) {
+	options := []huh.Option[string]{
+		huh.NewOption("GitHub OAuth — opens browser, one-click auth (Recommended)", "oauth"),
+	}
+	if ghCLIAvailable() {
+		options = append(options, huh.NewOption("gh CLI — use existing gh auth session", "gh"))
+	}
+	options = append(options, huh.NewOption("Personal Access Token — paste a token manually", "pat"))
+
+	var method string
+	err := huh.NewSelect[string]().
+		Title("Choose authentication method").
+		Options(options...).
+		Value(&method).
+		Run()
+	if err != nil {
+		return "", fmt.Errorf("auth selection cancelled")
+	}
+
+	switch method {
+	case "oauth":
+		token, err := DeviceFlow()
+		if err != nil {
+			return "", fmt.Errorf("OAuth failed: %w", err)
+		}
+		saveTokenWithUser(token, "oauth")
+		return token, nil
+
+	case "gh":
+		token, err := ghAuthToken()
+		if err != nil || token == "" {
+			return "", fmt.Errorf("failed to get token from gh CLI: %w", err)
+		}
+		scopes, err := ValidateTokenScopes(token)
+		if err != nil {
+			return "", fmt.Errorf("gh CLI token is invalid: %w", err)
+		}
+		if !HasRepoScope(scopes) {
+			fmt.Printf("\n  %s gh CLI token is missing the %s scope.\n", yellow("⚠"), cyan("repo"))
+			fmt.Printf("  Run: %s\n", cyan("gh auth refresh -s repo"))
+		}
+		saveTokenWithUser(token, "gh")
+		return token, nil
+
+	case "pat":
+		return promptPAT()
+
+	default:
+		return "", fmt.Errorf("invalid choice")
+	}
+}
+
+// saveTokenWithUser validates, gets the username, and saves the account.
+func saveTokenWithUser(token, method string) {
+	user := validateAndGetUser(token)
+	if user != "" {
+		_ = SaveAccount(user, token, method)
+		fmt.Printf("  %s Authenticated as %s\n", green("✓"), bold("@"+user))
+	}
+}
+
+func promptPAT() (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Println()
+		fmt.Printf("  Create a token at: %s\n", cyan("https://github.com/settings/tokens"))
+		fmt.Printf("  Required scope: %s\n", cyan("repo"))
+		fmt.Println()
+		fmt.Print("  Enter token: ")
+		token, _ := reader.ReadString('\n')
+		token = strings.TrimSpace(token)
+		if token == "" {
+			return "", fmt.Errorf("no token provided")
+		}
+
+		scopes, err := ValidateTokenScopes(token)
+		if err != nil {
+			fmt.Printf("\n  %s Token is invalid: %v\n", red("✗"), err)
+			var retry bool
+			_ = huh.NewConfirm().
+				Title("Try another token?").
+				Affirmative("Yes").
+				Negative("No").
+				Value(&retry).
+				Run()
+			if !retry {
+				return "", fmt.Errorf("invalid token")
+			}
+			continue
+		}
+
+		if !HasRepoScope(scopes) {
+			fmt.Printf("\n  %s Token is missing the %s scope.\n", yellow("⚠"), cyan("repo"))
+			fmt.Printf("  Current scopes: %s\n", dim(strings.Join(scopes, ", ")))
+			fmt.Printf("  The %s scope is required to access repository data.\n", cyan("repo"))
+			var retry bool
+			_ = huh.NewConfirm().
+				Title("Try another token with the correct scope?").
+				Affirmative("Yes, enter new token").
+				Negative("No, use this token anyway").
+				Value(&retry).
+				Run()
+			if retry {
+				continue
+			}
+		}
+
+		saveTokenWithUser(token, "prompt")
 		return token, nil
 	}
-
-	// 6. Interactive prompt
-	fmt.Print("Enter GitHub Personal Access Token: ")
-	reader := bufio.NewReader(os.Stdin)
-	token, _ = reader.ReadString('\n')
-	token = strings.TrimSpace(token)
-	if token != "" {
-		if err := ValidateToken(token); err == nil {
-			_ = CacheToken(token, "prompt")
-			return token, nil
-		}
-		return "", fmt.Errorf("invalid token")
-	}
-
-	return "", fmt.Errorf("no GitHub authentication available — set GITHUB_TOKEN, install gh CLI, or provide a PAT")
 }
 
 // ValidateToken checks if a token is valid by calling GET /user.
 func ValidateToken(token string) error {
+	_, err := validateTokenWithScopes(token)
+	return err
+}
+
+// ValidateTokenScopes checks if a token is valid AND returns its scopes.
+func ValidateTokenScopes(token string) ([]string, error) {
+	return validateTokenWithScopes(token)
+}
+
+func validateTokenWithScopes(token string) ([]string, error) {
 	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("token validation failed: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("token validation failed: HTTP %d", resp.StatusCode)
 	}
-	return nil
+
+	scopeHeader := resp.Header.Get("X-OAuth-Scopes")
+	var scopes []string
+	for _, s := range strings.Split(scopeHeader, ",") {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			scopes = append(scopes, s)
+		}
+	}
+	return scopes, nil
+}
+
+// HasRepoScope checks if "repo" scope is present.
+func HasRepoScope(scopes []string) bool {
+	for _, s := range scopes {
+		if s == "repo" {
+			return true
+		}
+	}
+	return false
+}
+
+// validateAndGetUser validates a token and returns the GitHub username.
+func validateAndGetUser(token string) string {
+	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return ""
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var user struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(body, &user); err != nil {
+		return ""
+	}
+	return user.Login
+}
+
+// Logout removes a specific account or all accounts.
+// If username is empty, prompts user to select which account to remove.
+func Logout(username string) error {
+	if username != "" {
+		return RemoveAccount(username)
+	}
+
+	accounts := LoadAllAccounts()
+	if len(accounts) == 0 {
+		return nil
+	}
+
+	if len(accounts) == 1 {
+		return RemoveAccount(accounts[0].Username)
+	}
+
+	// Multiple accounts — let user choose
+	options := make([]huh.Option[string], 0, len(accounts)+1)
+	for _, a := range accounts {
+		options = append(options, huh.NewOption(
+			fmt.Sprintf("@%s (%s)", a.Username, a.Method),
+			a.Username,
+		))
+	}
+	options = append(options, huh.NewOption("Remove all accounts", "__all__"))
+
+	var choice string
+	err := huh.NewSelect[string]().
+		Title("Which account to remove?").
+		Options(options...).
+		Value(&choice).
+		Run()
+	if err != nil {
+		return nil
+	}
+
+	if choice == "__all__" {
+		return RemoveAllAccounts()
+	}
+	return RemoveAccount(choice)
+}
+
+// ghCLIAvailable checks if the gh CLI is installed.
+func ghCLIAvailable() bool {
+	_, err := exec.LookPath("gh")
+	return err == nil
 }
 
 // ghAuthToken extracts a token from the gh CLI.
@@ -101,4 +370,18 @@ func ghAuthToken() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// OpenBrowser opens a URL in the user's default browser (cross-platform).
+func OpenBrowser(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default: // linux, freebsd
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
 }

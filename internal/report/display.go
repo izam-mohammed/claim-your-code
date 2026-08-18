@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/fatih/color"
 )
 
@@ -47,56 +48,71 @@ func statusLabel(status string) string {
 	}
 }
 
-// PrintList displays all reports in a compact overview table.
-func PrintList(reports []*Report) {
+// PrintListAndSelect displays all reports and lets user select one to view.
+func PrintListAndSelect(reports []*Report) {
 	if len(reports) == 0 {
 		fmt.Printf("\n%s No claim reports found.\n", dim("→"))
 		return
 	}
 
-	fmt.Printf("\n%s %s\n\n", boldCyan("⚡"), bold(fmt.Sprintf("Claim Reports (%d)", len(reports))))
+	fmt.Printf("\n%s %s\n", boldCyan("⚡"), bold(fmt.Sprintf("Claim Reports (%d)", len(reports))))
 
-	for _, r := range reports {
+	// Build select options
+	options := make([]huh.Option[string], len(reports))
+	for i, r := range reports {
 		status := "pending"
 		if r.Result != nil {
 			status = r.Result.Status
 		}
 		icon := statusIcon(status)
 
-		// Reverted tag
 		revertTag := ""
 		if r.Reverted != nil {
 			icon = red("↩")
 			revertTag = red(" (reverted)")
 		}
 
-		// Models summary
 		modelParts := []string{}
 		for model, count := range r.Summary.Models {
-			modelParts = append(modelParts, fmt.Sprintf("%s × %d", model, count))
+			modelParts = append(modelParts, fmt.Sprintf("%s×%d", model, count))
 		}
 		modelStr := strings.Join(modelParts, ", ")
 
-		// Source label
-		source := dim(filepath.Base(r.Repo))
+		source := filepath.Base(r.Repo)
 		if r.IsRemote() {
-			source = dim(r.RemoteOwner + "/" + r.RemoteRepo)
+			source = r.RemoteOwner + "/" + r.RemoteRepo
 			if r.PRNumber > 0 {
-				source = dim(fmt.Sprintf("%s/%s#%d", r.RemoteOwner, r.RemoteRepo, r.PRNumber))
+				source = fmt.Sprintf("%s/%s#%d", r.RemoteOwner, r.RemoteRepo, r.PRNumber)
 			}
 		}
 
-		fmt.Printf("  %s %s  %s  %s  %s  %s%s\n",
-			icon,
-			boldCyan(r.ID),
-			source,
-			dim(r.CreatedAt.Local().Format("2006-01-02 15:04")),
-			bold(fmt.Sprintf("%d commits", r.Summary.AffectedCommits)),
-			dim(modelStr),
-			revertTag)
+		label := fmt.Sprintf("%s %s  %s  %s  %d commits  %s%s",
+			icon, r.ID, source,
+			r.CreatedAt.Local().Format("01-02 15:04"),
+			r.Summary.AffectedCommits,
+			modelStr, revertTag)
+
+		options[i] = huh.NewOption(label, r.ID)
 	}
 
-	fmt.Printf("\n%s Run %s to see details\n", dim("→"), cyan("claim report <id>"))
+	var selected string
+	err := huh.NewSelect[string]().
+		Title("Select a report to view").
+		Options(options...).
+		Height(15).
+		Value(&selected).
+		Run()
+	if err != nil || selected == "" {
+		return
+	}
+
+	// Find and display the selected report
+	for _, r := range reports {
+		if r.ID == selected {
+			PrintDetail(r)
+			return
+		}
+	}
 }
 
 // PrintDetail displays a single report with full details.
@@ -110,7 +126,7 @@ func PrintDetail(r *Report) {
 	// Meta
 	fmt.Printf("  %s  %s\n", dim("ID:"), boldCyan(r.ID))
 	if r.IsRemote() {
-		fmt.Printf("  %s  %s\n", dim("Source:"), bold(r.RemoteURL))
+		fmt.Printf("  %s  %s\n", dim("Repo:"), cyan(r.RemoteURL))
 		if r.PRNumber > 0 {
 			fmt.Printf("  %s  %s %s\n", dim("PR:"), bold(fmt.Sprintf("#%d", r.PRNumber)), dim(r.PRTitle))
 			if r.PRBranch != "" {
@@ -121,8 +137,6 @@ func PrintDetail(r *Report) {
 		fmt.Printf("  %s  %s\n", dim("Repo:"), bold(r.Repo))
 	}
 	fmt.Printf("  %s  %s\n", dim("Date:"), r.CreatedAt.Local().Format("2006-01-02 15:04:05"))
-	fmt.Printf("  %s  %s\n", dim("Tool:"), fmt.Sprintf("claim %s", r.Version))
-
 	// Status
 	status := "pending"
 	if r.Result != nil {
