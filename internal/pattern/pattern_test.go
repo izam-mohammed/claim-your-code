@@ -86,3 +86,21 @@ func TestExtractModelName(t *testing.T) {
 		})
 	}
 }
+
+func TestSubject(t *testing.T) {
+	tests := []struct {
+		message string
+		want    string
+	}{
+		{"one line", "one line"},
+		{"subject\n\nbody here", "subject"},
+		{"subject\nCo-Authored-By: Claude", "subject"},
+		{"", ""},
+		{"\nleading newline", ""},
+	}
+	for _, tt := range tests {
+		if got := Subject(tt.message); got != tt.want {
+			t.Errorf("Subject(%q) = %q, want %q", tt.message, got, tt.want)
+		}
+	}
+}

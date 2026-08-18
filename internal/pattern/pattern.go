@@ -38,3 +38,13 @@ func ExtractModelName(message string) string {
 	}
 	return ""
 }
+
+// Subject returns a commit message's first line, the way git log --oneline does.
+func Subject(message string) string {
+	for i, ch := range message {
+		if ch == '\n' {
+			return message[:i]
+		}
+	}
+	return message
+}
