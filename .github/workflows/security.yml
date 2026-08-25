@@ -12,6 +12,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: izam-mohammed/.github/.github/workflows/security-scan.yml@ce1b7cc9c4298348fd0020825e2c0ecbb17bd32f # main
+    uses: izam-mohammed/.github/.github/workflows/security-scan.yml@ff76c481a8178b302451b9523454310722fb9465 # main
     with:
       ecosystem: go
