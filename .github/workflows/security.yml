@@ -1,0 +1,17 @@
+name: Security
+
+on:
+  pull_request:
+  schedule:
+    - cron: '17 3 * * 1'
+
+permissions: {}
+
+jobs:
+  scan:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: izam-mohammed/.github/.github/workflows/security-scan.yml@ce1b7cc9c4298348fd0020825e2c0ecbb17bd32f # main
+    with:
+      ecosystem: go
