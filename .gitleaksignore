@@ -1,0 +1,11 @@
+# gitleaks fingerprints we've looked at and cleared.
+# format: <file>:<rule>:<line>. anything not listed still fails the gate.
+
+# a github oauth *client id*. public by design ~ it ships inside every
+# distributed binary and can't be used without the user completing the
+# device flow. not a credential.
+internal/auth/oauth.go:generic-api-key:17
+
+# test fixture. "ghp_test_abc123" is a made-up string checked into a
+# round-trip test to prove tokens get encrypted at rest.
+internal/auth/auth_test.go:generic-api-key:11
