@@ -59,6 +59,14 @@ func stubConfirm(t *testing.T, answers ...bool) {
 	t.Cleanup(func() { confirmPrompt = prev })
 }
 
+// stubInteractive controls whether GetToken believes it has a terminal.
+func stubInteractive(t *testing.T, yes bool) {
+	t.Helper()
+	prev := interactive
+	interactive = func() bool { return yes }
+	t.Cleanup(func() { interactive = prev })
+}
+
 // stubStdin feeds promptPAT the given input.
 func stubStdin(t *testing.T, input string) {
 	t.Helper()
@@ -82,6 +90,7 @@ func clearTokenEnv(t *testing.T) {
 
 func TestGetTokenPicksASavedAccount(t *testing.T) {
 	isolateStore(t)
+	stubInteractive(t, true)
 	noGhCLI(t)
 	clearTokenEnv(t)
 	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +120,7 @@ func TestGetTokenPicksASavedAccount(t *testing.T) {
 
 func TestGetTokenContinueWithoutAuth(t *testing.T) {
 	isolateStore(t)
+	stubInteractive(t, true)
 	noGhCLI(t)
 	clearTokenEnv(t)
 	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
@@ -130,47 +140,59 @@ func TestGetTokenContinueWithoutAuth(t *testing.T) {
 	}
 }
 
-func TestGetTokenPrefersEnvVarWhenNoAccountSaved(t *testing.T) {
+func TestGetTokenUsesAnExplicitClaimTokenWithoutAsking(t *testing.T) {
+	// CLAIM_GITHUB_TOKEN is claim's own variable: setting it says which
+	// credential to use, so offering a menu anyway is not helpful.
 	isolateStore(t)
 	noGhCLI(t)
+	stubInteractive(t, true)
 	t.Setenv("CLAIM_GITHUB_TOKEN", "env-token")
 	t.Setenv("GITHUB_TOKEN", "")
 	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"login":"env-user"}`))
 	})
-	stubSelect(t, "found_0")
+	offered := stubSelect(t, "found_0")
 
 	token, err := GetToken()
 	if err != nil {
 		t.Fatalf("GetToken: %v", err)
 	}
 	if token != "env-token" {
-		t.Errorf("GetToken = %q, want the token from the environment", token)
+		t.Errorf("GetToken = %q, want the token from CLAIM_GITHUB_TOKEN", token)
+	}
+	if len(*offered) != 0 {
+		t.Errorf("a picker was shown despite an explicit CLAIM_GITHUB_TOKEN: %v", *offered)
 	}
 }
 
-func TestGetTokenDeduplicatesEnvVars(t *testing.T) {
+func TestGetTokenDeduplicatesTheSameTokenFromTwoSources(t *testing.T) {
+	// A saved account and GITHUB_TOKEN holding the same token is one
+	// credential, and should be offered once.
 	isolateStore(t)
 	noGhCLI(t)
-	// The same token exposed under both names must appear once.
-	t.Setenv("CLAIM_GITHUB_TOKEN", "same")
-	t.Setenv("GITHUB_TOKEN", "same")
+	stubInteractive(t, true)
+	t.Setenv("CLAIM_GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "shared-token")
 	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"login":"u"}`))
+		w.Write([]byte(`{"login":"izam"}`))
 	})
+	if err := SaveAccount("izam", "shared-token", "pat"); err != nil {
+		t.Fatal(err)
+	}
 	offered := stubSelect(t, "found_0")
 
 	if _, err := GetToken(); err != nil {
 		t.Fatal(err)
 	}
-	keys := (*offered)[0]
-	if len(keys) != 3 {
-		t.Errorf("options = %v, want one account plus the two trailing choices", keys)
+	values := (*offered)[0]
+	if len(values) != 3 {
+		t.Errorf("options = %v, want one credential plus the two trailing choices", values)
 	}
 }
 
 func TestGetTokenUsesGhCLIToken(t *testing.T) {
 	isolateStore(t)
+	stubInteractive(t, true)
 	clearTokenEnv(t)
 	dir := t.TempDir()
 	if err := writeStub(dir, "gh", "#!/bin/sh\necho ghp_from_gh\n"); err != nil {
@@ -196,6 +218,7 @@ func TestGetTokenUsesGhCLIToken(t *testing.T) {
 
 func TestGetTokenCancelledSelection(t *testing.T) {
 	isolateStore(t)
+	stubInteractive(t, true)
 	noGhCLI(t)
 	clearTokenEnv(t)
 	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +236,7 @@ func TestGetTokenCancelledSelection(t *testing.T) {
 
 func TestGetTokenFallsThroughToPromptWhenAddingAnother(t *testing.T) {
 	isolateStore(t)
+	stubInteractive(t, true)
 	noGhCLI(t)
 	clearTokenEnv(t)
 	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
@@ -557,5 +581,101 @@ func TestLogoutCancelledLeavesAccountsAlone(t *testing.T) {
 	}
 	if len(ListAccountUsernames()) != 2 {
 		t.Error("a cancelled logout removed accounts")
+	}
+}
+
+func TestGetTokenWithoutATerminalUsesTheFirstCredential(t *testing.T) {
+	// With no terminal a picker cannot be drawn, and failing on it made claim
+	// unusable from CI or a script even with a valid token available.
+	isolateStore(t)
+	noGhCLI(t)
+	clearTokenEnv(t)
+	stubInteractive(t, false)
+	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"login":"izam-mohammed"}`))
+	})
+	if err := SaveAccount("izam-mohammed", "saved-token", "oauth"); err != nil {
+		t.Fatal(err)
+	}
+	offered := stubSelect(t, "found_0")
+
+	token, err := GetToken()
+	if err != nil {
+		t.Fatalf("GetToken with no terminal: %v", err)
+	}
+	if token != "saved-token" {
+		t.Errorf("GetToken = %q, want the saved token", token)
+	}
+	if len(*offered) != 0 {
+		t.Error("a picker was attempted with no terminal to draw it on")
+	}
+}
+
+func TestGetTokenWithoutATerminalUsesAnEnvToken(t *testing.T) {
+	isolateStore(t)
+	noGhCLI(t)
+	stubInteractive(t, false)
+	t.Setenv("CLAIM_GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "ci-token")
+	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"login":"ci-user"}`))
+	})
+
+	token, err := GetToken()
+	if err != nil {
+		t.Fatalf("GetToken: %v", err)
+	}
+	if token != "ci-token" {
+		t.Errorf("GetToken = %q, want the token from GITHUB_TOKEN", token)
+	}
+}
+
+func TestGetTokenWithoutATerminalAndNoCredentialsExplainsItself(t *testing.T) {
+	isolateStore(t)
+	noGhCLI(t)
+	clearTokenEnv(t)
+	stubInteractive(t, false)
+
+	_, err := GetToken()
+	if err == nil {
+		t.Fatal("GetToken succeeded with no credentials and no terminal")
+	}
+	if !strings.Contains(err.Error(), "CLAIM_GITHUB_TOKEN") {
+		t.Errorf("error = %v, want it to name the variable to set", err)
+	}
+	if strings.Contains(err.Error(), "cancelled") {
+		t.Errorf("error = %v, want it to explain the problem rather than blame a cancelled prompt", err)
+	}
+}
+
+func TestGetTokenWithoutATerminalDoesNotOpenTheAuthPrompt(t *testing.T) {
+	// Falling through to promptForAuth would sit on a selection nobody can
+	// answer, or worse, start an OAuth device flow with no one watching.
+	isolateStore(t)
+	noGhCLI(t)
+	clearTokenEnv(t)
+	stubInteractive(t, false)
+
+	prompted := false
+	prev := selectOption
+	selectOption = func(string, []huh.Option[string]) (string, error) {
+		prompted = true
+		return "", fmt.Errorf("no terminal")
+	}
+	t.Cleanup(func() { selectOption = prev })
+
+	if _, err := GetToken(); err == nil {
+		t.Fatal("expected an error")
+	}
+	if prompted {
+		t.Error("an auth prompt was opened with no terminal")
+	}
+}
+
+func TestInteractiveDefaultsFalseUnderTest(t *testing.T) {
+	// go test does not attach a terminal to stdin, so the real detector must
+	// report false here — otherwise the guard above would never engage.
+	if interactive() {
+		t.Skip("this run does have a terminal on stdin")
 	}
 }

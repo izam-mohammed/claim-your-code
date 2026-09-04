@@ -59,6 +59,16 @@ var confirmPrompt = func(title, affirmative, negative string) bool {
 // promptInput is where promptPAT reads a pasted token from.
 var promptInput io.Reader = os.Stdin
 
+// interactive reports whether there is a terminal to prompt on. Without one
+// there is nobody to answer a picker, so claim must decide for itself.
+var interactive = func() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
 type foundToken struct {
 	token  string
 	source string
@@ -94,6 +104,26 @@ func GetToken() (string, error) {
 		}
 	}
 
+	// CLAIM_GITHUB_TOKEN is claim's own variable: setting it is an
+	// instruction, not one more candidate to offer in a menu.
+	if explicit := os.Getenv("CLAIM_GITHUB_TOKEN"); explicit != "" {
+		for _, f := range found {
+			if f.token == explicit {
+				fmt.Printf("  %s Authenticated as %s %s\n", green("✓"), bold("@"+f.user), dim("(CLAIM_GITHUB_TOKEN)"))
+				return f.token, nil
+			}
+		}
+	}
+
+	// With no terminal, a picker cannot be drawn and failing on it would make
+	// claim unusable from CI or a script. Take the first credential that
+	// validated instead, and say which one.
+	if len(found) > 0 && !interactive() {
+		f := found[0]
+		fmt.Printf("  %s Authenticated as %s %s\n", green("✓"), bold("@"+f.user), dim("("+f.source+", chosen non-interactively)"))
+		return f.token, nil
+	}
+
 	// If tokens found, let user pick
 	if len(found) > 0 {
 		options := make([]huh.Option[string], 0, len(found)+2)
@@ -124,6 +154,11 @@ func GetToken() (string, error) {
 				return f.token, nil
 			}
 		}
+	}
+
+	if !interactive() {
+		return "", fmt.Errorf("no GitHub credentials found and no terminal to ask on — " +
+			"set CLAIM_GITHUB_TOKEN, or run claim interactively to sign in")
 	}
 
 	// No accounts or user wants to add another
