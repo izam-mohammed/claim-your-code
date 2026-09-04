@@ -25,19 +25,25 @@ var (
 	boldCyan = color.New(color.Bold, color.FgCyan).SprintFunc()
 )
 
+// exit ends the process. Tests replace it to observe fatal paths.
+var exit = os.Exit
+
 // fatal reports a failure the command cannot continue past.
 func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "%s %v\n", red("Error:"), err)
-	os.Exit(1)
+	exit(1)
 }
 
 // fatalf is fatal for failures described in words rather than carried in an error.
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "%s %s\n", red("Error:"), fmt.Sprintf(format, args...))
-	os.Exit(1)
+	exit(1)
 }
 
-func confirm(title string) bool {
+// The prompts below are variables so tests can answer them without a terminal.
+
+// confirm asks a yes/no question, answering no if the prompt cannot run.
+var confirm = func(title string) bool {
 	var yes bool
 	err := huh.NewConfirm().
 		Title(title).
@@ -52,9 +58,7 @@ func confirm(title string) bool {
 }
 
 // confirmDangerous requires explicit "confirm" input for destructive actions.
-
-// confirmDangerous requires explicit "confirm" input for destructive actions.
-func confirmDangerous(title string) bool {
+var confirmDangerous = func(title string) bool {
 	var input string
 	err := huh.NewInput().
 		Title(title).
@@ -65,6 +69,34 @@ func confirmDangerous(title string) bool {
 		return false
 	}
 	return strings.TrimSpace(strings.ToLower(input)) == "confirm"
+}
+
+// selectOne asks the user to pick a single option.
+var selectOne = func(title string, options []huh.Option[string], height int) (string, error) {
+	var choice string
+	sel := huh.NewSelect[string]().
+		Title(title).
+		Options(options...).
+		Value(&choice)
+	if height > 0 {
+		sel = sel.Height(height)
+	}
+	err := sel.Run()
+	return choice, err
+}
+
+// selectMany asks the user to pick any number of options.
+var selectMany = func(title string, options []huh.Option[string], height int) ([]string, error) {
+	var chosen []string
+	sel := huh.NewMultiSelect[string]().
+		Title(title).
+		Options(options...).
+		Value(&chosen)
+	if height > 0 {
+		sel = sel.Height(height)
+	}
+	err := sel.Run()
+	return chosen, err
 }
 
 func printProgress(done, total int, current string, start time.Time) {

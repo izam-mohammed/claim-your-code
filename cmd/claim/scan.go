@@ -131,11 +131,7 @@ func cloneAndScanConcurrent(client *githubpkg.Client, repos []githubpkg.RepoInfo
 			if err != nil {
 				return clone{repo: repo, err: err}
 			}
-			cloneURL := fmt.Sprintf("https://github.com/%s/%s.git", repo.Owner, repo.Name)
-			if client.IsAuthenticated() {
-				cloneURL = client.AuthCloneURL(repo.Owner, repo.Name)
-			}
-			path, err := githubpkg.Clone(cloneURL, tmpDir)
+			path, err := githubpkg.Clone(cloneURLFor(client, repo.Owner, repo.Name), tmpDir)
 			return clone{repo: repo, path: path, tmpDir: tmpDir, err: err}
 		})
 

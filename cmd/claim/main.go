@@ -12,10 +12,14 @@ import (
 
 var version = "dev"
 
-func main() {
+func main() { dispatch() }
+
+// dispatch routes os.Args to the matching command.
+func dispatch() {
 	if len(os.Args) < 2 {
 		printUsage()
-		os.Exit(1)
+		exit(1)
+		return
 	}
 
 	switch os.Args[1] {

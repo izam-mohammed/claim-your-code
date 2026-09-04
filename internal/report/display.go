@@ -20,6 +20,19 @@ var (
 	boldGreen = color.New(color.Bold, color.FgGreen).SprintFunc()
 )
 
+// selectReport asks which report to view. Tests replace it to answer
+// without a terminal.
+var selectReport = func(options []huh.Option[string]) (string, error) {
+	var selected string
+	err := huh.NewSelect[string]().
+		Title("Select a report to view").
+		Options(options...).
+		Height(15).
+		Value(&selected).
+		Run()
+	return selected, err
+}
+
 // statusIcon returns a colored icon for the result status.
 func statusIcon(status string) string {
 	switch status {
@@ -95,13 +108,7 @@ func PrintListAndSelect(reports []*Report) {
 		options[i] = huh.NewOption(label, r.ID)
 	}
 
-	var selected string
-	err := huh.NewSelect[string]().
-		Title("Select a report to view").
-		Options(options...).
-		Height(15).
-		Value(&selected).
-		Run()
+	selected, err := selectReport(options)
 	if err != nil || selected == "" {
 		return
 	}

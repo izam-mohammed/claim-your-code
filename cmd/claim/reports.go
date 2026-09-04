@@ -100,7 +100,8 @@ func revertReport(repoPath string, rpt *report.Report) {
 		} else {
 			fmt.Fprintf(os.Stderr, "%s Report %s has no branch refs to revert to.\n", red("Error:"), cyan(rpt.ID))
 		}
-		os.Exit(1)
+		exit(1)
+		return
 	}
 
 	repoName := filepath.Base(repoPath)

@@ -16,6 +16,13 @@ import (
 // Registered at: https://github.com/settings/applications
 const oauthClientID = "Ov23liGrayvWtyIWfuvZ"
 
+// oauthBase is the GitHub OAuth host. Overridden in tests.
+var oauthBase = "https://github.com"
+
+// openBrowser launches the verification URL. Tests replace it so no
+// browser window opens during a run.
+var openBrowser = OpenBrowser
+
 type deviceCodeResponse struct {
 	DeviceCode      string `json:"device_code"`
 	UserCode        string `json:"user_code"`
@@ -39,7 +46,7 @@ func DeviceFlow() (string, error) {
 	}
 
 	// Step 1: Request device code
-	req, err := http.NewRequest("POST", "https://github.com/login/device/code",
+	req, err := http.NewRequest("POST", oauthBase+"/login/device/code",
 		strings.NewReader(url.Values{
 			"client_id": {oauthClientID},
 			"scope":     {"repo"},
@@ -75,7 +82,7 @@ func DeviceFlow() (string, error) {
 	fmt.Printf("  Your code: %s\n\n", yellowBold(dcr.UserCode))
 
 	// Auto-open browser
-	if err := OpenBrowser(dcr.VerificationURI); err == nil {
+	if err := openBrowser(dcr.VerificationURI); err == nil {
 		fmt.Printf("  %s Browser opened → %s\n", green("✓"), cyan(dcr.VerificationURI))
 	} else {
 		fmt.Printf("  Open this URL in your browser:\n")
@@ -108,7 +115,7 @@ func DeviceFlow() (string, error) {
 }
 
 func pollForToken(deviceCode string) (string, error) {
-	req, err := http.NewRequest("POST", "https://github.com/login/oauth/access_token",
+	req, err := http.NewRequest("POST", oauthBase+"/login/oauth/access_token",
 		strings.NewReader(url.Values{
 			"client_id":   {oauthClientID},
 			"device_code": {deviceCode},

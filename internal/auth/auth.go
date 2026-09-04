@@ -24,6 +24,41 @@ var (
 	bold   = color.New(color.Bold).SprintFunc()
 )
 
+// apiBase is the GitHub API root. Overridden in tests.
+var apiBase = "https://api.github.com"
+
+// The prompts and input source below are variables so tests can drive the
+// interactive flows without a terminal.
+
+// selectOption asks the user to pick one option.
+var selectOption = func(title string, options []huh.Option[string]) (string, error) {
+	var choice string
+	err := huh.NewSelect[string]().
+		Title(title).
+		Options(options...).
+		Value(&choice).
+		Run()
+	return choice, err
+}
+
+// confirmPrompt asks a yes/no question, answering no if it cannot run.
+var confirmPrompt = func(title, affirmative, negative string) bool {
+	var yes bool
+	err := huh.NewConfirm().
+		Title(title).
+		Affirmative(affirmative).
+		Negative(negative).
+		Value(&yes).
+		Run()
+	if err != nil {
+		return false
+	}
+	return yes
+}
+
+// promptInput is where promptPAT reads a pasted token from.
+var promptInput io.Reader = os.Stdin
+
 type foundToken struct {
 	token  string
 	source string
@@ -71,12 +106,7 @@ func GetToken() (string, error) {
 		options = append(options, huh.NewOption("Add another account", "other"))
 		options = append(options, huh.NewOption("Continue without auth (public repos only)", "public"))
 
-		var choice string
-		err := huh.NewSelect[string]().
-			Title("GitHub account").
-			Options(options...).
-			Value(&choice).
-			Run()
+		choice, err := selectOption("GitHub account", options)
 		if err != nil {
 			return "", fmt.Errorf("cancelled")
 		}
@@ -131,12 +161,7 @@ func promptForAuth() (string, error) {
 	}
 	options = append(options, huh.NewOption("Personal Access Token — paste a token manually", "pat"))
 
-	var method string
-	err := huh.NewSelect[string]().
-		Title("Choose authentication method").
-		Options(options...).
-		Value(&method).
-		Run()
+	method, err := selectOption("Choose authentication method", options)
 	if err != nil {
 		return "", fmt.Errorf("auth selection cancelled")
 	}
@@ -184,7 +209,7 @@ func saveTokenWithUser(token, method string) {
 }
 
 func promptPAT() (string, error) {
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(promptInput)
 
 	for {
 		fmt.Println()
@@ -201,14 +226,7 @@ func promptPAT() (string, error) {
 		scopes, err := ValidateTokenScopes(token)
 		if err != nil {
 			fmt.Printf("\n  %s Token is invalid: %v\n", red("✗"), err)
-			var retry bool
-			_ = huh.NewConfirm().
-				Title("Try another token?").
-				Affirmative("Yes").
-				Negative("No").
-				Value(&retry).
-				Run()
-			if !retry {
+			if !confirmPrompt("Try another token?", "Yes", "No") {
 				return "", fmt.Errorf("invalid token")
 			}
 			continue
@@ -218,14 +236,7 @@ func promptPAT() (string, error) {
 			fmt.Printf("\n  %s Token is missing the %s scope.\n", yellow("⚠"), cyan("repo"))
 			fmt.Printf("  Current scopes: %s\n", dim(strings.Join(scopes, ", ")))
 			fmt.Printf("  The %s scope is required to access repository data.\n", cyan("repo"))
-			var retry bool
-			_ = huh.NewConfirm().
-				Title("Try another token with the correct scope?").
-				Affirmative("Yes, enter new token").
-				Negative("No, use this token anyway").
-				Value(&retry).
-				Run()
-			if retry {
+			if confirmPrompt("Try another token with the correct scope?", "Yes, enter new token", "No, use this token anyway") {
 				continue
 			}
 		}
@@ -247,7 +258,7 @@ func ValidateTokenScopes(token string) ([]string, error) {
 }
 
 func validateTokenWithScopes(token string) ([]string, error) {
-	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
+	req, err := http.NewRequest("GET", apiBase+"/user", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +298,7 @@ func HasRepoScope(scopes []string) bool {
 
 // validateAndGetUser validates a token and returns the GitHub username.
 func validateAndGetUser(token string) string {
-	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
+	req, err := http.NewRequest("GET", apiBase+"/user", nil)
 	if err != nil {
 		return ""
 	}
@@ -340,12 +351,7 @@ func Logout(username string) error {
 	}
 	options = append(options, huh.NewOption("Remove all accounts", "__all__"))
 
-	var choice string
-	err := huh.NewSelect[string]().
-		Title("Which account to remove?").
-		Options(options...).
-		Value(&choice).
-		Run()
+	choice, err := selectOption("Which account to remove?", options)
 	if err != nil {
 		return nil
 	}

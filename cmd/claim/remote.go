@@ -53,9 +53,13 @@ func nonFlagArg() string {
 	return ""
 }
 
+// getToken fetches a GitHub token. Tests replace it to avoid the
+// interactive account picker.
+var getToken = auth.GetToken
+
 func requireAuth() *githubpkg.Client {
 	fmt.Printf("%s Authenticating with GitHub...\n", cyan("::"))
-	token, err := auth.GetToken()
+	token, err := getToken()
 	if err != nil {
 		fatal(err)
 	}
@@ -91,12 +95,7 @@ func runLogout() {
 		options = append(options, huh.NewOption("Remove all accounts", "__all__"))
 	}
 
-	var choice string
-	err := huh.NewSelect[string]().
-		Title("Which account to remove?").
-		Options(options...).
-		Value(&choice).
-		Run()
+	choice, err := selectOne("Which account to remove?", options, 0)
 	if err != nil {
 		return
 	}
@@ -114,6 +113,19 @@ func runLogout() {
 	}
 }
 
+// cloneBase is the host clone URLs are built from. Tests point it at a local
+// directory so the clone paths can run without reaching GitHub.
+var cloneBase = "https://github.com"
+
+// cloneURLFor builds the URL used to clone owner/repo, embedding the token
+// when the client has one.
+func cloneURLFor(client *githubpkg.Client, owner, repo string) string {
+	if client.IsAuthenticated() && cloneBase == "https://github.com" {
+		return client.AuthCloneURL(owner, repo)
+	}
+	return fmt.Sprintf("%s/%s/%s.git", cloneBase, owner, repo)
+}
+
 // cloneToTemp clones a repo into a temporary directory, using an authenticated
 // URL when the client has a token. The returned cleanup must be deferred by the
 // caller -- doing it here would delete the clone before it could be scanned.
@@ -124,11 +136,7 @@ func cloneToTemp(client *githubpkg.Client, owner, repo string) (path string, cle
 	}
 	cleanup = func() { githubpkg.CleanupTempDir(tmpDir) }
 
-	cloneURL := fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
-	if client.IsAuthenticated() {
-		cloneURL = client.AuthCloneURL(owner, repo)
-	}
-	path, err = githubpkg.Clone(cloneURL, tmpDir)
+	path, err = githubpkg.Clone(cloneURLFor(client, owner, repo), tmpDir)
 	if err != nil {
 		cleanup()
 		fatal(err)
@@ -502,14 +510,7 @@ func runRemoteMultiRepo(client *githubpkg.Client, name string, isOrg bool) {
 
 	// Offer to authenticate for full access if currently unauthenticated
 	if !client.IsAuthenticated() {
-		var wantAuth bool
-		_ = huh.NewConfirm().
-			Title("Authenticate for full access? (includes private repos)").
-			Affirmative("Yes, authenticate").
-			Negative("No, public repos only").
-			Value(&wantAuth).
-			Run()
-		if wantAuth {
+		if confirm("Authenticate for full access? (includes private repos)") {
 			client = requireAuth()
 			// Re-fetch with auth
 			fmt.Printf("\n%s Re-fetching repos with full access...\n", cyan("::"))
@@ -532,15 +533,12 @@ func runRemoteMultiRepo(client *githubpkg.Client, name string, isOrg bool) {
 	if flags.force {
 		selected = active
 	} else {
-		var scope string
-		err = huh.NewSelect[string]().
-			Title(fmt.Sprintf("Scan all %d repos or select individually?", len(active))).
-			Options(
+		scope, err := selectOne(
+			fmt.Sprintf("Scan all %d repos or select individually?", len(active)),
+			[]huh.Option[string]{
 				huh.NewOption(fmt.Sprintf("All %d repos", len(active)), "all"),
 				huh.NewOption("Select repos individually", "select"),
-			).
-			Value(&scope).
-			Run()
+			}, 0)
 		if err != nil {
 			return
 		}
@@ -557,13 +555,7 @@ func runRemoteMultiRepo(client *githubpkg.Client, name string, isOrg bool) {
 				repoOptions[i] = huh.NewOption(label, r.Name)
 			}
 
-			var selectedNames []string
-			err = huh.NewMultiSelect[string]().
-				Title("Select repos to scan").
-				Options(repoOptions...).
-				Height(12).
-				Value(&selectedNames).
-				Run()
+			selectedNames, err := selectMany("Select repos to scan", repoOptions, 12)
 			if err != nil || len(selectedNames) == 0 {
 				fmt.Printf("\n%s No repos selected.\n", yellow("!"))
 				return
@@ -587,15 +579,10 @@ func runRemoteMultiRepo(client *githubpkg.Client, name string, isOrg bool) {
 	}
 
 	// Ask scan method
-	var scanMethod string
-	err = huh.NewSelect[string]().
-		Title("Scan method").
-		Options(
-			huh.NewOption("Quick scan via API (recent commits, fast)", "api"),
-			huh.NewOption("Full clone & scan (all history, complete)", "clone"),
-		).
-		Value(&scanMethod).
-		Run()
+	scanMethod, err := selectOne("Scan method", []huh.Option[string]{
+		huh.NewOption("Quick scan via API (recent commits, fast)", "api"),
+		huh.NewOption("Full clone & scan (all history, complete)", "clone"),
+	}, 0)
 	if err != nil {
 		return
 	}

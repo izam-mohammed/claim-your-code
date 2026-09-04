@@ -73,8 +73,8 @@ func TestGetRepo(t *testing.T) {
 	c := &Client{token: "test-token", http: srv.Client()}
 	// Override API base for testing
 	origBase := apiBase
-	defer func() { setAPIBase(origBase) }()
-	setAPIBase(srv.URL)
+	defer func() { SetAPIBase(origBase) }()
+	SetAPIBase(srv.URL)
 
 	repo, err := c.GetRepo("owner", "myrepo")
 	if err != nil {
@@ -99,8 +99,8 @@ func TestGetRepo404(t *testing.T) {
 
 	c := &Client{token: "test-token", http: srv.Client()}
 	origBase := apiBase
-	defer func() { setAPIBase(origBase) }()
-	setAPIBase(srv.URL)
+	defer func() { SetAPIBase(origBase) }()
+	SetAPIBase(srv.URL)
 
 	_, err := c.GetRepo("owner", "nonexistent")
 	if err == nil {
@@ -129,8 +129,8 @@ func TestListCommits(t *testing.T) {
 
 	c := &Client{token: "test-token", http: srv.Client()}
 	origBase := apiBase
-	defer func() { setAPIBase(origBase) }()
-	setAPIBase(srv.URL)
+	defer func() { SetAPIBase(origBase) }()
+	SetAPIBase(srv.URL)
 
 	commits, err := c.ListCommits("owner", "repo", "main", 10)
 	if err != nil {
@@ -179,8 +179,8 @@ func TestGetPR(t *testing.T) {
 
 	c := &Client{token: "test-token", http: srv.Client()}
 	origBase := apiBase
-	defer func() { setAPIBase(origBase) }()
-	setAPIBase(srv.URL)
+	defer func() { SetAPIBase(origBase) }()
+	SetAPIBase(srv.URL)
 
 	pr, err := c.GetPR("owner", "repo", 42)
 	if err != nil {
