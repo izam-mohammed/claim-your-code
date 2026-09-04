@@ -56,13 +56,18 @@ func Checkout(repoPath, branch string) error {
 }
 
 // PushForce force-pushes a branch to the origin remote.
+//
+// Uses --force rather than --force-with-lease: filter-branch rewrites the
+// remote-tracking refs alongside the local ones, so the lease is always stale
+// by the time we get here and the push could never succeed.
 func PushForce(repoPath, branch string) error {
-	cmd := exec.Command("git", "push", "--force-with-lease", "origin", branch)
+	refspec := fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch)
+	cmd := exec.Command("git", "push", "--force", "origin", refspec)
 	cmd.Dir = repoPath
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git push --force-with-lease failed: %w", err)
+		return fmt.Errorf("git push --force failed: %w", err)
 	}
 	return nil
 }
