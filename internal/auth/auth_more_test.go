@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // serveAPI points the package's GitHub API base at a test server.
@@ -22,16 +23,18 @@ func serveAPI(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	return srv
 }
 
-// serveOAuth points the package's OAuth host at a test server and stops
-// DeviceFlow from launching a real browser.
+// serveOAuth points the package's OAuth host at a test server, stops
+// DeviceFlow from launching a real browser, and shrinks the poll interval so
+// tests do not spend their run time asleep.
 func serveOAuth(t *testing.T, handler http.HandlerFunc) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(handler)
-	prevBase, prevOpen := oauthBase, openBrowser
+	prevBase, prevOpen, prevUnit := oauthBase, openBrowser, pollUnit
 	oauthBase = srv.URL
 	openBrowser = func(string) error { return nil }
+	pollUnit = time.Millisecond
 	t.Cleanup(func() {
-		oauthBase, openBrowser = prevBase, prevOpen
+		oauthBase, openBrowser, pollUnit = prevBase, prevOpen, prevUnit
 		srv.Close()
 	})
 	return srv
@@ -61,21 +64,73 @@ func TestValidateTokenScopesParsesHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scopes) != 2 || scopes[0] != "repo" || scopes[1] != "read:org" {
-		t.Errorf("scopes = %v, want [repo read:org] with whitespace and blanks trimmed", scopes)
+	if !scopes.Listed {
+		t.Error("Listed = false, but GitHub sent a scope header")
+	}
+	if len(scopes.List) != 2 || scopes.List[0] != "repo" || scopes.List[1] != "read:org" {
+		t.Errorf("scopes = %v, want [repo read:org] with whitespace and blanks trimmed", scopes.List)
+	}
+	if scopes.MissingRepoScope() {
+		t.Error("MissingRepoScope = true for a token that lists repo")
 	}
 }
 
-func TestValidateTokenScopesEmptyHeader(t *testing.T) {
+func TestValidateTokenScopesNoHeader(t *testing.T) {
+	// GitHub sends no X-OAuth-Scopes header for fine-grained tokens.
 	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"login":"izam"}`))
 	})
-	scopes, err := ValidateTokenScopes("tok")
+	scopes, err := ValidateTokenScopes("github_pat_x")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scopes) != 0 {
-		t.Errorf("scopes = %v, want none", scopes)
+	if len(scopes.List) != 0 {
+		t.Errorf("scopes = %v, want none", scopes.List)
+	}
+	if scopes.Listed {
+		t.Error("Listed = true, but no scope header was sent")
+	}
+	if scopes.MissingRepoScope() {
+		t.Error("a token GitHub listed no scopes for must not be reported as missing repo")
+	}
+}
+
+func TestValidateTokenScopesEmptyHeaderIsStillAList(t *testing.T) {
+	// A classic token with no scopes at all sends the header, empty. That is
+	// evidence, unlike the header being absent.
+	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-OAuth-Scopes", "")
+		w.Write([]byte(`{"login":"izam"}`))
+	})
+	scopes, err := ValidateTokenScopes("ghp_noscopes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !scopes.Listed {
+		t.Error("Listed = false, but the header was present")
+	}
+	if !scopes.MissingRepoScope() {
+		t.Error("a classic token with an empty scope list is missing repo")
+	}
+}
+
+func TestTokenScopesMissingRepoScope(t *testing.T) {
+	tests := []struct {
+		name   string
+		scopes TokenScopes
+		want   bool
+	}{
+		{"classic with repo", TokenScopes{List: []string{"repo", "gist"}, Listed: true}, false},
+		{"classic without repo", TokenScopes{List: []string{"gist"}, Listed: true}, true},
+		{"classic with no scopes", TokenScopes{Listed: true}, true},
+		{"fine-grained, nothing listed", TokenScopes{Listed: false}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.scopes.MissingRepoScope(); got != tt.want {
+				t.Errorf("MissingRepoScope() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -429,7 +484,7 @@ func TestPollForToken(t *testing.T) {
 	}{
 		{"granted", `{"access_token":"tok"}`, "tok", false},
 		{"pending keeps polling", `{"error":"authorization_pending"}`, "", false},
-		{"slow down keeps polling", `{"error":"slow_down"}`, "", false},
+		{"slow down asks for a back-off", `{"error":"slow_down"}`, "", true},
 		{"hard error", `{"error":"access_denied"}`, "", true},
 		{"empty response", `{}`, "", false},
 		{"malformed", `{not json`, "", true},
@@ -509,4 +564,180 @@ func TestOAuthClientIDIsSet(t *testing.T) {
 // writeStub creates an executable shell stub named name inside dir.
 func writeStub(dir, name, body string) error {
 	return os.WriteFile(dir+"/"+name, []byte(body), 0o755)
+}
+
+func TestDeviceFlowStopsWhenTheUserDenies(t *testing.T) {
+	// Polling on after access_denied left the user watching "Waiting for
+	// authorization..." until the code expired -- 15 minutes, by GitHub's
+	// default expires_in -- and then reported a timeout instead of the denial.
+	var polls int
+	serveOAuth(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login/device/code" {
+			w.Write([]byte(`{"device_code":"d","user_code":"U","verification_uri":"https://example.invalid/d","expires_in":600,"interval":1}`))
+			return
+		}
+		polls++
+		w.Write([]byte(`{"error":"access_denied"}`))
+	})
+
+	start := time.Now()
+	_, err := DeviceFlow()
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("DeviceFlow succeeded after the user denied the request")
+	}
+	if !strings.Contains(err.Error(), "access_denied") {
+		t.Errorf("error = %v, want it to report the denial", err)
+	}
+	if polls != 1 {
+		t.Errorf("polled %d times, want it to stop after the first denial", polls)
+	}
+	// The deadline is far out; returning promptly is the whole point.
+	if elapsed > 5*time.Second {
+		t.Errorf("took %v to report a denial", elapsed)
+	}
+}
+
+func TestDeviceFlowStopsOnAnExpiredCode(t *testing.T) {
+	serveOAuth(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login/device/code" {
+			w.Write([]byte(`{"device_code":"d","user_code":"U","verification_uri":"https://example.invalid/d","expires_in":600,"interval":1}`))
+			return
+		}
+		w.Write([]byte(`{"error":"expired_token"}`))
+	})
+
+	_, err := DeviceFlow()
+	if err == nil || !strings.Contains(err.Error(), "expired_token") {
+		t.Errorf("error = %v, want it to report the expired code", err)
+	}
+}
+
+func TestDeviceFlowKeepsPollingThroughATransportFailure(t *testing.T) {
+	// A network hiccup is not a reason to abandon the flow.
+	var polls int
+	srv := serveOAuth(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login/device/code" {
+			w.Write([]byte(`{"device_code":"d","user_code":"U","verification_uri":"https://example.invalid/d","expires_in":600,"interval":1}`))
+			return
+		}
+		polls++
+		if polls == 1 {
+			// Hang up mid-response so the client sees a transport error.
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Skip("test server does not support hijacking")
+			}
+			conn, _, err := hj.Hijack()
+			if err != nil {
+				t.Skip("could not hijack the connection")
+			}
+			conn.Close()
+			return
+		}
+		w.Write([]byte(`{"access_token":"ghp_eventually"}`))
+	})
+	_ = srv
+
+	token, err := DeviceFlow()
+	if err != nil {
+		t.Fatalf("DeviceFlow gave up on a transport error: %v", err)
+	}
+	if token != "ghp_eventually" {
+		t.Errorf("token = %q, want the one granted on the retry", token)
+	}
+	if polls < 2 {
+		t.Errorf("polled %d times, want it to have retried", polls)
+	}
+}
+
+func TestDeviceFlowBacksOffOnSlowDown(t *testing.T) {
+	// slow_down must widen the gap between polls, so measure the gaps rather
+	// than the total: without a back-off both would be one interval.
+	var pollTimes []time.Time
+	serveOAuth(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login/device/code" {
+			w.Write([]byte(`{"device_code":"d","user_code":"U","verification_uri":"https://example.invalid/d","expires_in":600,"interval":1}`))
+			return
+		}
+		pollTimes = append(pollTimes, time.Now())
+		if len(pollTimes) == 1 {
+			w.Write([]byte(`{"error":"slow_down"}`))
+			return
+		}
+		w.Write([]byte(`{"access_token":"ghp_after_backoff"}`))
+	})
+	// A coarser unit than the package default, so the two gaps separate
+	// cleanly without making the test slow.
+	pollUnit = 20 * time.Millisecond
+
+	start := time.Now()
+	token, err := DeviceFlow()
+	if err != nil {
+		t.Fatalf("DeviceFlow: %v", err)
+	}
+	if token != "ghp_after_backoff" {
+		t.Errorf("token = %q", token)
+	}
+	if len(pollTimes) != 2 {
+		t.Fatalf("polled %d times, want 2", len(pollTimes))
+	}
+
+	first := pollTimes[0].Sub(start)
+	second := pollTimes[1].Sub(pollTimes[0])
+	t.Logf("gap before the first poll: %v, before the second: %v", first, second)
+
+	// The interval doubles from one floor to two, so allow generous slack and
+	// still catch a missing back-off, which would leave the gaps equal.
+	if second < first*3/2 {
+		t.Errorf("poll gaps were %v then %v — slow_down did not widen the interval", first, second)
+	}
+}
+
+func TestPromptPATAcceptsAFineGrainedTokenWithoutWarning(t *testing.T) {
+	// GitHub lists no scopes for fine-grained tokens, which used to be read
+	// as "missing the repo scope" and produced a spurious retry prompt.
+	isolateStore(t)
+	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"login":"izam-mohammed"}`)) // no X-OAuth-Scopes
+	})
+	stubStdin(t, "github_pat_valid\n")
+	stubConfirm(t) // any confirmation prompt would answer "no"
+
+	token, err := promptPAT()
+	if err != nil {
+		t.Fatalf("promptPAT rejected a fine-grained token: %v", err)
+	}
+	if token != "github_pat_valid" {
+		t.Errorf("token = %q", token)
+	}
+	if names := ListAccountUsernames(); len(names) != 1 {
+		t.Errorf("accounts = %v, want the token saved", names)
+	}
+}
+
+func TestPromptPATStillWarnsOnAClassicTokenWithoutRepo(t *testing.T) {
+	// The fix above must not silence the case it was meant to keep.
+	isolateStore(t)
+	var calls int
+	serveAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("X-OAuth-Scopes", "gist, read:org")
+		} else {
+			w.Header().Set("X-OAuth-Scopes", "repo")
+		}
+		w.Write([]byte(`{"login":"izam"}`))
+	})
+	stubStdin(t, "ghp_narrow\nghp_wide\n")
+	stubConfirm(t, true) // yes, enter a new token
+
+	token, err := promptPAT()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "ghp_wide" {
+		t.Errorf("token = %q, want the retry to have been offered and taken", token)
+	}
 }

@@ -184,7 +184,7 @@ func promptForAuth() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("gh CLI token is invalid: %w", err)
 		}
-		if !HasRepoScope(scopes) {
+		if scopes.MissingRepoScope() {
 			fmt.Printf("\n  %s gh CLI token is missing the %s scope.\n", yellow("⚠"), cyan("repo"))
 			fmt.Printf("  Run: %s\n", cyan("gh auth refresh -s repo"))
 		}
@@ -232,9 +232,9 @@ func promptPAT() (string, error) {
 			continue
 		}
 
-		if !HasRepoScope(scopes) {
+		if scopes.MissingRepoScope() {
 			fmt.Printf("\n  %s Token is missing the %s scope.\n", yellow("⚠"), cyan("repo"))
-			fmt.Printf("  Current scopes: %s\n", dim(strings.Join(scopes, ", ")))
+			fmt.Printf("  Current scopes: %s\n", dim(strings.Join(scopes.List, ", ")))
 			fmt.Printf("  The %s scope is required to access repository data.\n", cyan("repo"))
 			if confirmPrompt("Try another token with the correct scope?", "Yes, enter new token", "No, use this token anyway") {
 				continue
@@ -246,44 +246,69 @@ func promptPAT() (string, error) {
 	}
 }
 
+// TokenScopes is what GitHub reported about a token's permissions.
+//
+// Listed says whether GitHub sent an X-OAuth-Scopes header at all. It only
+// does so for classic tokens; fine-grained personal access tokens and app
+// installation tokens carry their permissions out of band, so for those there
+// is no scope list to inspect and List is empty with Listed false.
+type TokenScopes struct {
+	List   []string
+	Listed bool
+}
+
+// MissingRepoScope reports whether the token is known to lack repo access.
+//
+// It is false when GitHub listed no scopes: that is not evidence of a problem,
+// and warning there would flag every fine-grained token as broken.
+func (s TokenScopes) MissingRepoScope() bool {
+	if !s.Listed {
+		return false
+	}
+	return !HasRepoScope(s.List)
+}
+
 // ValidateToken checks if a token is valid by calling GET /user.
 func ValidateToken(token string) error {
 	_, err := validateTokenWithScopes(token)
 	return err
 }
 
-// ValidateTokenScopes checks if a token is valid AND returns its scopes.
-func ValidateTokenScopes(token string) ([]string, error) {
+// ValidateTokenScopes checks if a token is valid AND reports its scopes.
+func ValidateTokenScopes(token string) (TokenScopes, error) {
 	return validateTokenWithScopes(token)
 }
 
-func validateTokenWithScopes(token string) ([]string, error) {
+func validateTokenWithScopes(token string) (TokenScopes, error) {
 	req, err := http.NewRequest("GET", apiBase+"/user", nil)
 	if err != nil {
-		return nil, err
+		return TokenScopes{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return TokenScopes{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("token validation failed: HTTP %d", resp.StatusCode)
+		return TokenScopes{}, fmt.Errorf("token validation failed: HTTP %d", resp.StatusCode)
 	}
 
-	scopeHeader := resp.Header.Get("X-OAuth-Scopes")
+	// Header.Get cannot tell an absent header from an empty one, and the
+	// difference is exactly what matters here.
+	values, listed := resp.Header[http.CanonicalHeaderKey("X-OAuth-Scopes")]
+
 	var scopes []string
-	for _, s := range strings.Split(scopeHeader, ",") {
+	for _, s := range strings.Split(strings.Join(values, ","), ",") {
 		s = strings.TrimSpace(s)
 		if s != "" {
 			scopes = append(scopes, s)
 		}
 	}
-	return scopes, nil
+	return TokenScopes{List: scopes, Listed: listed}, nil
 }
 
 // HasRepoScope checks if "repo" scope is present.

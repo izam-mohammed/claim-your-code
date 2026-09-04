@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -30,6 +31,23 @@ type deviceCodeResponse struct {
 	ExpiresIn       int    `json:"expires_in"`
 	Interval        int    `json:"interval"`
 }
+
+// oauthError is an error GitHub reported through the OAuth error field, as
+// opposed to a transport failure. These are terminal: the user denied the
+// request, or the device code expired, and no amount of polling will help.
+type oauthError struct{ code string }
+
+func (e *oauthError) Error() string { return "oauth error: " + e.code }
+
+// errSlowDown asks the caller to poll less often, per RFC 8628 section 3.5.
+var errSlowDown = errors.New("slow_down")
+
+// minPollInterval is the floor, in seconds, for the gap between polls. Tests
+// lower it so they do not spend their run time asleep.
+var minPollInterval = 5
+
+// pollUnit is what an interval count is multiplied by. Tests shrink it.
+var pollUnit = time.Second
 
 type tokenResponse struct {
 	AccessToken string `json:"access_token"`
@@ -93,16 +111,29 @@ func DeviceFlow() (string, error) {
 
 	// Step 3: Poll for token
 	interval := dcr.Interval
-	if interval < 5 {
-		interval = 5
+	if interval < minPollInterval {
+		interval = minPollInterval
 	}
-	deadline := time.Now().Add(time.Duration(dcr.ExpiresIn) * time.Second)
+	deadline := time.Now().Add(time.Duration(dcr.ExpiresIn) * pollUnit)
 
 	for time.Now().Before(deadline) {
-		time.Sleep(time.Duration(interval) * time.Second)
+		time.Sleep(time.Duration(interval) * pollUnit)
 
 		token, err := pollForToken(dcr.DeviceCode)
-		if err != nil {
+		switch {
+		case errors.Is(err, errSlowDown):
+			// GitHub wants a longer gap between polls.
+			interval += minPollInterval
+			continue
+		case err != nil:
+			var oe *oauthError
+			if errors.As(err, &oe) {
+				// The user denied the request, or the code expired. Say so
+				// rather than sitting here until the deadline.
+				fmt.Println()
+				return "", err
+			}
+			// A transport hiccup — keep polling until the code expires.
 			continue
 		}
 		if token != "" {
@@ -141,12 +172,14 @@ func pollForToken(deviceCode string) (string, error) {
 	if tr.AccessToken != "" {
 		return tr.AccessToken, nil
 	}
-	if tr.Error == "authorization_pending" || tr.Error == "slow_down" {
+	switch tr.Error {
+	case "authorization_pending":
 		return "", nil // keep polling
+	case "slow_down":
+		return "", errSlowDown
+	case "":
+		return "", nil
+	default:
+		return "", &oauthError{code: tr.Error}
 	}
-	if tr.Error != "" {
-		return "", fmt.Errorf("oauth error: %s", tr.Error)
-	}
-
-	return "", nil
 }
