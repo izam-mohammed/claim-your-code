@@ -1,5 +1,9 @@
 # claim
 
+<p align="center">
+  <img src="assets/who-wrote-the-code.png" alt="Anthropic CEO claiming the code is theirs" width="100%">
+</p>
+
 Remove Claude as a co-author from your git commit history.
 
 When you use Claude Code (or similar AI tools), commits are automatically co-authored with Claude:
