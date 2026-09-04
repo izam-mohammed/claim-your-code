@@ -147,7 +147,7 @@ func cloneToTemp(client *githubpkg.Client, owner, repo string) (path string, cle
 func runRemoteRepo() {
 	arg := nonFlagArg()
 	if arg == "" {
-		fatalf("Usage: claim repo <owner/repo or URL>")
+		fatalf("missing argument — run `claim repo --help`\n\n  Usage: claim repo <owner/repo or URL>")
 	}
 	target, err := remote.ParseRepo(arg)
 	if err != nil {
@@ -294,7 +294,7 @@ func runRemoteRepoWithTarget(target *remote.Target) {
 func runRemotePR() {
 	arg := nonFlagArg()
 	if arg == "" {
-		fatalf("Usage: claim pr <owner/repo#N or PR URL>")
+		fatalf("missing argument — run `claim pr --help`\n\n  Usage: claim pr <owner/repo#N or PR URL>")
 	}
 	target, err := remote.ParsePR(arg)
 	if err != nil {
@@ -470,12 +470,12 @@ func runRemoteMultiRepoByName(name string) {
 }
 
 func runRemoteOrg() {
-	name := ownerArg("Usage: claim org <org-name or URL>")
+	name := ownerArg("missing argument — run `claim org --help`\n\n  Usage: claim org <org-name or URL>")
 	runRemoteMultiRepo(publicOrAuthedClient(name, true), name, true)
 }
 
 func runRemoteUser() {
-	name := ownerArg("Usage: claim user <username or URL>")
+	name := ownerArg("missing argument — run `claim user --help`\n\n  Usage: claim user <username or URL>")
 	runRemoteMultiRepo(publicOrAuthedClient(name, false), name, false)
 }
 

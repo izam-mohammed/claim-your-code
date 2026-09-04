@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/izam-mohammed/claim-your-code/internal/remote"
 )
@@ -22,7 +23,30 @@ func dispatch() {
 		return
 	}
 
-	switch os.Args[1] {
+	cmd := os.Args[1]
+
+	// `claim help [command]` and `claim <command> --help`.
+	if isHelpFlag(cmd) {
+		if len(os.Args) >= 3 && showCommandHelp(os.Args[2]) {
+			return
+		}
+		showHelp()
+		return
+	}
+	if wantsHelp(os.Args[2:]) {
+		if showCommandHelp(cmd) {
+			return
+		}
+		// Not a subcommand, so it is a folder or a URL.
+		if remote.IsURL(cmd) {
+			showCommandHelp("<github-url>")
+		} else {
+			showCommandHelp("<folder>")
+		}
+		return
+	}
+
+	switch cmd {
 	case "__filter-msg":
 		runFilterMsg()
 	case "repo":
@@ -41,10 +65,12 @@ func dispatch() {
 		runRevert()
 	case "--version", "-v":
 		fmt.Printf("claim %s\n", version)
-	case "--help", "-h":
-		printUsage()
 	default:
-		arg := os.Args[1]
+		arg := cmd
+		if strings.HasPrefix(arg, "-") {
+			fatalf("unknown flag %q — run `claim --help` to see the available commands", arg)
+			return
+		}
 		if remote.IsURL(arg) {
 			target, err := remote.ParseURL(arg)
 			if err != nil {
@@ -62,30 +88,4 @@ func dispatch() {
 			runClaim(arg)
 		}
 	}
-}
-
-func printUsage() {
-	fmt.Fprintf(os.Stderr, `%s - Remove Claude as co-author from git commits
-
-%s
-  claim <folder>                Scan and clean local git repositories
-  claim <github-url>            Auto-detect repo or PR from URL
-
-%s
-  claim repo <owner/repo>       Scan a remote GitHub repo
-  claim pr <owner/repo#N>       Scan a pull request
-  claim org <name>              Scan all repos in an organization
-  claim user <name>             Scan all repos of a user
-
-%s
-  claim report [id|all]         List or show claim reports
-  claim revert <id>             Revert a specific clean
-  claim logout [username]        Remove saved GitHub account(s)
-
-%s
-  --dry-run          Show what would be changed without modifying anything
-  --force            Skip confirmation prompt
-  --apply            For remote repos, rewrite and force-push (default: scan only)
-  --api-only         Scan via GitHub API without cloning (faster, may miss old commits)
-`, bold("claim"), bold("Local:"), bold("Remote:"), bold("Reports:"), bold("Flags:"))
 }

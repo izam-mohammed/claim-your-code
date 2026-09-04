@@ -78,7 +78,7 @@ func runReport() {
 
 func runRevert() {
 	if len(os.Args) < 3 {
-		fatalf("Usage: claim revert <id>")
+		fatalf("missing argument — run `claim revert --help`\n\n  Usage: claim revert <id>")
 	}
 
 	idArg := os.Args[2]
