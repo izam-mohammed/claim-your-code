@@ -292,3 +292,64 @@ func TestRevertFailureExits(t *testing.T) {
 		t.Errorf("a failed revert should exit, got (%d, %v)", code, exited)
 	}
 }
+
+func TestRevertRejectsARemoteReportWithAClearMessage(t *testing.T) {
+	isolateData(t)
+	rpt := report.Build(version, "github.com/owner/repo", 5, nil, nil)
+	rpt.RemoteURL = "https://github.com/owner/repo"
+	rpt.RemoteOwner = "owner"
+	rpt.RemoteRepo = "repo"
+	rpt.SetOriginalRefs(map[string]string{"main": strings.Repeat("a", 40)})
+	rpt.SetResult("cleaned", 2)
+	if err := rpt.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code, exited := runMain(t, []string{"claim", "revert", rpt.ID}, runRevert)
+	if !exited || code != 1 {
+		t.Errorf("expected an exit, got (%d, %v)", code, exited)
+	}
+	if !strings.Contains(out, "remote clean, which cannot be reverted") {
+		t.Errorf("the error should explain why, not fail at chdir:\n%s", out)
+	}
+	if strings.Contains(out, "no such file or directory") {
+		t.Errorf("revert should refuse up front, not try to chdir into a deleted clone:\n%s", out)
+	}
+}
+
+func TestRevertReportWithNoRecordedResult(t *testing.T) {
+	// The guard allowed Result to be nil and the message then dereferenced it.
+	isolateData(t)
+	rpt := report.Build(version, "/repo", 3, nil, nil)
+	rpt.SetOriginalRefs(map[string]string{"main": strings.Repeat("a", 40)})
+
+	out, code, exited := runMain(t, []string{"claim"}, func() {
+		revertReport("/repo", rpt)
+	})
+	if !exited || code != 1 {
+		t.Errorf("expected an exit, got (%d, %v)", code, exited)
+	}
+	if !strings.Contains(out, "no recorded result") {
+		t.Errorf("output = %q", out)
+	}
+}
+
+func TestClaimRepoOnADetachedHEADWithDefaultScope(t *testing.T) {
+	isolateData(t)
+	stubFilter(t)
+	repo := newRepo(t, filepath.Join(t.TempDir(), "detached"))
+	commit(t, repo, "a.txt", "feat: base")
+	commit(t, repo, "b.txt", "feat: claimed\n\n"+claudeTrailer)
+	head := git(t, repo, "rev-parse", "HEAD")
+	git(t, repo, "checkout", "--detach", head)
+
+	out, _, _ := runMain(t, []string{"claim"}, func() {
+		claimRepo(repo, false, true, true) // default-branch scope
+	})
+	if strings.Contains(out, "filter-branch failed") {
+		t.Errorf("cleaning a detached HEAD failed:\n%s", out)
+	}
+	if strings.Contains(git(t, repo, "log", "--format=%B"), "anthropic.com") {
+		t.Error("the trailer survived on a detached HEAD")
+	}
+}

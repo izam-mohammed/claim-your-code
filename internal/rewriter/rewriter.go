@@ -154,6 +154,12 @@ func ChangedBranches(beforeRefs, afterRefs map[string]string) []string {
 // resolveRef finds the actual git ref for a branch name.
 // Checks refs/heads/ first, then refs/remotes/origin/.
 func resolveRef(repoPath, branch string) string {
+	// A detached HEAD is reported by the scanner as the branch name "HEAD".
+	// There is no refs/heads/HEAD to rewrite, so pass HEAD through unchanged.
+	if branch == "HEAD" {
+		return "HEAD"
+	}
+
 	// Try local branch
 	localRef := "refs/heads/" + branch
 	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", localRef)

@@ -316,3 +316,29 @@ func TestSetExecutableOverridesAndRestores(t *testing.T) {
 		t.Errorf("executable() = %q after restore, want %q", got, original)
 	}
 }
+
+func TestResolveRefPassesHEADThrough(t *testing.T) {
+	repo := initTestRepo(t)
+	addCommit(t, repo, "a.txt", "feat: one")
+	// A detached HEAD is reported as the branch name "HEAD", and there is no
+	// refs/heads/HEAD for filter-branch to rewrite.
+	if got := resolveRef(repo, "HEAD"); got != "HEAD" {
+		t.Errorf("resolveRef(\"HEAD\") = %q, want %q", got, "HEAD")
+	}
+}
+
+func TestRewriteBranchesOnADetachedHEAD(t *testing.T) {
+	stubFilter(t)
+	repo := initTestRepo(t)
+	addCommit(t, repo, "a.txt", "feat: base")
+	addCommit(t, repo, "b.txt", "feat: claimed\n\n"+claudeTrailer)
+	head := gitOut(t, repo, "rev-parse", "HEAD")
+	gitOut(t, repo, "checkout", "--detach", head)
+
+	if err := RewriteBranches(repo, []string{"HEAD"}); err != nil {
+		t.Fatalf("RewriteBranches on a detached HEAD: %v", err)
+	}
+	if strings.Contains(gitOut(t, repo, "log", "--format=%B"), "anthropic.com") {
+		t.Error("the trailer survived a rewrite of a detached HEAD")
+	}
+}

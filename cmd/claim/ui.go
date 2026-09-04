@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/huh"
 	"github.com/fatih/color"
@@ -100,9 +101,9 @@ var selectMany = func(title string, options []huh.Option[string], height int) ([
 }
 
 func printProgress(done, total int, current string, start time.Time) {
-	// Truncate label if too long
-	if len(current) > 25 {
-		current = current[:25] + "..."
+	// Truncate label if too long, by runes so multi-byte characters survive
+	if utf8.RuneCountInString(current) > 25 {
+		current = string([]rune(current)[:25]) + "..."
 	}
 
 	elapsed := time.Since(start)

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/izam-mohammed/claim-your-code/internal/scanner"
 )
@@ -323,5 +324,31 @@ func TestPrintCompactBranchSummaryTruncatesBranches(t *testing.T) {
 	})
 	if !strings.Contains(out, "... and 3 more branches") {
 		t.Errorf("8 branches should be truncated at 5:\n%s", out)
+	}
+}
+
+func TestPrintProgressTruncatesOnRuneBoundaries(t *testing.T) {
+	// Byte-slicing a label split multi-byte characters and printed mojibake.
+	label := strings.Repeat("日", 30)
+	out, _, _ := runMain(t, []string{"claim"}, func() {
+		printProgress(1, 2, label, time.Now())
+	})
+	if !utf8.ValidString(out) {
+		t.Errorf("progress output is not valid UTF-8: %q", out)
+	}
+	if strings.Contains(out, "�") {
+		t.Errorf("truncation produced a replacement character: %q", out)
+	}
+	if !strings.Contains(out, strings.Repeat("日", 25)+"...") {
+		t.Errorf("expected 25 runes then an ellipsis, got %q", out)
+	}
+}
+
+func TestPrintProgressKeepsShortUnicodeLabelsIntact(t *testing.T) {
+	out, _, _ := runMain(t, []string{"claim"}, func() {
+		printProgress(1, 2, "café ☕", time.Now())
+	})
+	if !strings.Contains(out, "café ☕") {
+		t.Errorf("a short label should be printed unchanged: %q", out)
 	}
 }

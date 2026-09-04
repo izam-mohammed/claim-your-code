@@ -5,6 +5,7 @@ package main
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -527,4 +528,35 @@ func TestRunRemoteMultiRepoCloneScan(t *testing.T) {
 	if !strings.Contains(out, "acme/one") {
 		t.Errorf("the cloned scan did not report the repo:\n%s", out)
 	}
+}
+
+func TestCloneAndScanConcurrentCleansUpAfterAFailedClone(t *testing.T) {
+	isolateData(t)
+	// A clone base with nothing behind it, so every clone fails.
+	prev := cloneBase
+	cloneBase = filepath.Join(t.TempDir(), "nothing-here")
+	t.Cleanup(func() { cloneBase = prev })
+
+	before := countClaimTempDirs(t)
+
+	runMain(t, []string{"claim"}, func() {
+		cloneAndScanConcurrent(githubpkg.NewPublicClient(), []githubpkg.RepoInfo{
+			{Owner: "acme", Name: "one", DefaultBranch: "main"},
+			{Owner: "acme", Name: "two", DefaultBranch: "main"},
+		})
+	})
+
+	if after := countClaimTempDirs(t); after > before {
+		t.Errorf("failed clones leaked %d temp directories", after-before)
+	}
+}
+
+// countClaimTempDirs counts the claim-* directories left in the temp dir.
+func countClaimTempDirs(t *testing.T) int {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(os.TempDir(), "claim-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(matches)
 }

@@ -486,3 +486,45 @@ func TestListAndLoadFailWithoutADataDir(t *testing.T) {
 		t.Error("FindByPrefix succeeded with no data directory")
 	}
 }
+
+func TestRemoteReportsAreNotRevertible(t *testing.T) {
+	// A remote clean runs in a temp clone that is deleted afterwards, so the
+	// refs it recorded name nothing that still exists.
+	r := &Report{RemoteURL: "https://github.com/owner/repo", RemoteOwner: "owner", RemoteRepo: "repo"}
+	r.SetOriginalRefs(map[string]string{"main": strings.Repeat("a", 40)})
+	r.SetResult("cleaned", 2)
+
+	if r.IsRevertible() {
+		t.Error("a remote clean reported itself as revertible")
+	}
+}
+
+func TestLocalReportWithTheSameShapeIsRevertible(t *testing.T) {
+	// The same report without a RemoteURL must still be revertible, so the
+	// guard above is not over-broad.
+	r := &Report{Repo: "/home/izam/code/project"}
+	r.SetOriginalRefs(map[string]string{"main": strings.Repeat("a", 40)})
+	r.SetResult("cleaned", 2)
+
+	if !r.IsRevertible() {
+		t.Error("a local clean should still be revertible")
+	}
+}
+
+func TestPrintDetailDoesNotOfferRevertForARemoteReport(t *testing.T) {
+	r := &Report{
+		ID:          "clm_remote",
+		RemoteURL:   "https://github.com/owner/repo",
+		RemoteOwner: "owner",
+		RemoteRepo:  "repo",
+		CreatedAt:   time.Now().UTC(),
+		Summary:     Summary{TotalCommits: 5, AffectedCommits: 1, Models: map[string]int{"Claude Opus 4.6": 1}},
+	}
+	r.SetOriginalRefs(map[string]string{"main": strings.Repeat("a", 40)})
+	r.SetResult("cleaned", 1)
+
+	out := capture(t, func() { PrintDetail(r) })
+	if strings.Contains(out, "claim revert") {
+		t.Errorf("a remote report should not offer a revert command:\n%s", out)
+	}
+}

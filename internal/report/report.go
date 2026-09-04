@@ -226,7 +226,14 @@ func (r *Report) SetReverted() {
 }
 
 // IsRevertible returns true if this report was a successful clean that hasn't been reverted.
+//
+// Remote cleans are never revertible: they run in a temporary clone that is
+// deleted when the command exits, so the refs recorded against them do not
+// name anything that still exists on disk.
 func (r *Report) IsRevertible() bool {
+	if r.IsRemote() {
+		return false
+	}
 	if r.Result == nil || r.Result.Status != "cleaned" || r.Reverted != nil {
 		return false
 	}
