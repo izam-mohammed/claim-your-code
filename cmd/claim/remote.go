@@ -97,6 +97,7 @@ func runLogout() {
 
 	choice, err := selectOne("Which account to remove?", options, 0)
 	if err != nil {
+		promptFailed(err, "choose an account", "Name the account instead: claim logout <username>")
 		return
 	}
 
@@ -329,7 +330,9 @@ func runRemotePRWithTarget(target *remote.Target) {
 	fmt.Printf("  %s %s → %s\n", dim("Branch:"), cyan(prInfo.HeadBranch), dim(prInfo.BaseBranch))
 
 	if flags.apiOnly {
-		scanRepoViaAPI(client, &prInfo.Repo)
+		// The head branch, not the repository default: a pull request's
+		// commits are the point of scanning one.
+		scanRepoViaAPI(client, &prInfo.Repo, prInfo.HeadBranch)
 		return
 	}
 
@@ -540,6 +543,7 @@ func runRemoteMultiRepo(client *githubpkg.Client, name string, isOrg bool) {
 				huh.NewOption("Select repos individually", "select"),
 			}, 0)
 		if err != nil {
+			promptFailed(err, "choose repositories", "Pass --force to scan every repository without prompting.")
 			return
 		}
 
@@ -578,15 +582,20 @@ func runRemoteMultiRepo(client *githubpkg.Client, name string, isOrg bool) {
 		return
 	}
 
-	// Ask scan method
-	scanMethod, err := selectOne("Scan method", []huh.Option[string]{
-		huh.NewOption("Quick scan via API (recent commits, fast)", "api"),
-		huh.NewOption("Full clone & scan (all history, complete)", "clone"),
-	}, 0)
-	if err != nil {
-		return
+	// Ask scan method. --force takes the default answer, as it does for
+	// every other prompt, so the whole command can run unattended.
+	useAPI := true
+	if !flags.force {
+		scanMethod, err := selectOne("Scan method", []huh.Option[string]{
+			huh.NewOption("Quick scan via API (recent commits, fast)", "api"),
+			huh.NewOption("Full clone & scan (all history, complete)", "clone"),
+		}, 0)
+		if err != nil {
+			promptFailed(err, "choose a scan method", "Pass --force to take the quick API scan.")
+			return
+		}
+		useAPI = scanMethod == "api"
 	}
-	useAPI := scanMethod == "api"
 
 	fmt.Printf("\n%s Scanning %d repo(s)...\n", cyan("::"), len(selected))
 

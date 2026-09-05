@@ -42,6 +42,33 @@ func fatalf(format string, args ...any) {
 	exit(1)
 }
 
+// promptFailed explains a prompt that could not be answered. Cancelling is a
+// decision, so it ends quietly; having no terminal is a dead end, so it names
+// what to run instead and fails.
+func promptFailed(err error, action, hint string) {
+	if !errors.Is(err, errNoTerminal) {
+		fmt.Printf("\n%s Cancelled.\n", red("✗"))
+		return
+	}
+	fmt.Fprintf(os.Stderr, "\n%s No terminal to %s on.\n", red("Error:"), action)
+	if hint != "" {
+		fmt.Fprintf(os.Stderr, "  %s\n", dim(hint))
+	}
+	exit(1)
+}
+
+// hasFlag reports whether one of names was passed to the command.
+func hasFlag(names ...string) bool {
+	for _, arg := range os.Args[2:] {
+		for _, name := range names {
+			if arg == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // The prompts below are variables so tests can answer them without a terminal.
 
 // errNoTerminal is what the pickers return when there is nobody to answer.

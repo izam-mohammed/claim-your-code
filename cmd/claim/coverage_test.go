@@ -309,7 +309,7 @@ func TestRevertReportSaveFailureWarns(t *testing.T) {
 	out, _, _ := runMain(t, []string{"claim", "revert", rpt.ID}, func() {
 		// Break the data directory only once the report is already loaded.
 		defer breakDataDirMidRun()()
-		revertReport(repo, rpt)
+		revertReport(repo, rpt, false)
 	})
 	if !strings.Contains(out, "Failed to record revert") {
 		t.Errorf("a revert that cannot be recorded should warn:\n%s", out)

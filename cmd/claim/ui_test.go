@@ -374,3 +374,46 @@ func TestPrintProgressKeepsShortUnicodeLabelsIntact(t *testing.T) {
 		t.Errorf("a short label should be printed unchanged: %q", out)
 	}
 }
+
+func TestPromptFailedExplainsAMissingTerminal(t *testing.T) {
+	out, code, exited := runMain(t, []string{"claim"}, func() {
+		promptFailed(errNoTerminal, "choose an account", "Name the account instead: claim logout <username>")
+	})
+	if !exited || code != 1 {
+		t.Errorf("a prompt that cannot run should exit, got (%d, %v)", code, exited)
+	}
+	for _, want := range []string{"No terminal to choose an account on", "claim logout <username>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestPromptFailedIsQuietWhenTheAnswerWasCancelled(t *testing.T) {
+	out, _, exited := runMain(t, []string{"claim"}, func() {
+		promptFailed(errors.New("user aborted"), "choose an account", "a hint")
+	})
+	if exited {
+		t.Error("cancelling is a decision, not a failure — it should not exit")
+	}
+	if !strings.Contains(out, "Cancelled") {
+		t.Errorf("output = %q", out)
+	}
+	if strings.Contains(out, "a hint") {
+		t.Errorf("a cancellation does not need the no-terminal hint:\n%s", out)
+	}
+}
+
+func TestHasFlagReadsTheCommandArguments(t *testing.T) {
+	prev := os.Args
+	t.Cleanup(func() { os.Args = prev })
+
+	os.Args = []string{"claim", "revert", "clm_a3f8b1", "--force"}
+	if !hasFlag("--force", "-f") {
+		t.Error("hasFlag missed --force")
+	}
+	os.Args = []string{"claim", "revert", "clm_a3f8b1"}
+	if hasFlag("--force", "-f") {
+		t.Error("hasFlag found a flag that was not passed")
+	}
+}

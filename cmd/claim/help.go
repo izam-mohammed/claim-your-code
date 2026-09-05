@@ -169,8 +169,10 @@ var commands = []commandDoc{
 			"beforehand, putting the Claude co-author trailers back.\n\n" +
 			"This only touches local branches. If you already force-pushed the cleaned\n" +
 			"history, push again afterwards to restore the remote.",
+		flags: []flagDoc{flagForce},
 		examples: []string{
 			"claim revert clm_a3f8b1",
+			"claim revert clm_a3f8b1 --force   # restore without the confirmation",
 		},
 	},
 	{

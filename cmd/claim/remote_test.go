@@ -759,3 +759,118 @@ func TestRunRemotePRNotFound(t *testing.T) {
 		t.Errorf("a missing PR should exit, got (%d, %v)", code, exited)
 	}
 }
+
+func TestRunRemotePRAPIOnlyScansTheHeadBranch(t *testing.T) {
+	// --api-only asked for the repository's default branch, so `claim pr`
+	// over the API reported main's commits and none of the pull request's.
+	isolateData(t)
+	var scanned string
+	serveGitHub(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/pulls/"):
+			w.Write([]byte(`{"number":42,"title":"a change","head":{"ref":"feature","sha":"abc"},"base":{"ref":"main"}}`))
+		case strings.HasPrefix(r.URL.Path, "/repos/owner/repo/commits"):
+			scanned = r.URL.Query().Get("sha")
+			w.Write([]byte(`[]`))
+		default:
+			w.Write([]byte(repoJSON("repo", false)))
+		}
+	})
+
+	target, err := remote.ParsePR("owner/repo#42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runMain(t, []string{"claim", "pr", "owner/repo#42", "--api-only"}, func() {
+		runRemotePRWithTarget(target)
+	})
+	if scanned != "feature" {
+		t.Errorf("scanned branch = %q, want the pull request's head branch", scanned)
+	}
+}
+
+func TestLogoutWithoutATerminalNamesTheDirectForm(t *testing.T) {
+	// The picker used to fail silently, so `claim logout` in a script or an
+	// agent printed nothing at all and exited 0.
+	isolateData(t)
+	if err := auth.SaveAccount("izam", "tok", "pat"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code, exited := runMain(t, []string{"claim", "logout"}, runLogout)
+	if !exited || code != 1 {
+		t.Errorf("a picker that cannot run should exit, got (%d, %v)", code, exited)
+	}
+	if !strings.Contains(out, "claim logout <username>") {
+		t.Errorf("the message should name the direct form:\n%s", out)
+	}
+}
+
+func TestRunRemoteMultiRepoForceTakesEveryDefault(t *testing.T) {
+	// --force selected every repo and then stopped on the scan-method
+	// prompt, so the flag could not carry a multi-repo scan on its own.
+	isolateData(t)
+	var commitRequests int
+	serveGitHub(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/commits") {
+			commitRequests++
+			w.Write([]byte(`[]`))
+			return
+		}
+		w.Write([]byte(`[{"name":"one","owner":{"login":"acme"},"default_branch":"main"}]`))
+	})
+
+	out, _, exited := runMain(t, []string{"claim", "org", "acme", "--force"}, func() {
+		runRemoteMultiRepo(githubpkg.NewClient("tok"), "acme", true)
+	})
+	if exited {
+		t.Errorf("--force should carry the whole scan:\n%s", out)
+	}
+	if !strings.Contains(out, "Scanning 1 repo(s)") {
+		t.Errorf("output = %q", out)
+	}
+	if commitRequests == 0 {
+		t.Error("no repository was actually scanned")
+	}
+}
+
+func TestRunRemoteMultiRepoWithoutATerminalNamesForce(t *testing.T) {
+	isolateData(t)
+	serveGitHub(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"name":"one","owner":{"login":"acme"},"default_branch":"main"}]`))
+	})
+
+	out, code, exited := runMain(t, []string{"claim", "org", "acme"}, func() {
+		runRemoteMultiRepo(githubpkg.NewClient("tok"), "acme", true)
+	})
+	if !exited || code != 1 {
+		t.Errorf("a picker that cannot run should exit, got (%d, %v)", code, exited)
+	}
+	if !strings.Contains(out, "--force") {
+		t.Errorf("the message should name --force:\n%s", out)
+	}
+}
+
+func TestRunRemoteRepoAPIOnlyExitsWhenTheBranchIsGone(t *testing.T) {
+	// A failed listing printed an error and exited 0, so a script could not
+	// tell "no Claude commits" from "that branch does not exist".
+	isolateData(t)
+	serveGitHub(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/repos/owner/repo/commits") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Write([]byte(repoJSON("repo", false)))
+	})
+
+	target, err := remote.ParseRepo("owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, code, exited := runMain(t, []string{"claim", "repo", "owner/repo", "--api-only"}, func() {
+		runRemoteRepoWithTarget(target)
+	})
+	if !exited || code != 1 {
+		t.Errorf("a failed API scan should exit, got (%d, %v)\n%s", code, exited, out)
+	}
+}
