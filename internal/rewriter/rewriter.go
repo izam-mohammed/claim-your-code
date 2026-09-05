@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+// executable resolves the claim binary used as the message filter.
+// Tests replace it with a stub filter.
+var executable = os.Executable
+
+// SetExecutable overrides the binary used as the message filter and returns a
+// function that restores the previous value. Intended for tests.
+func SetExecutable(path string) (restore func()) {
+	prev := executable
+	executable = func() (string, error) { return path, nil }
+	return func() { executable = prev }
+}
+
 // Rewrite rewrites all branches using git filter-branch.
 func Rewrite(repoPath string) error {
 	return RewriteBranches(repoPath, nil)
@@ -14,7 +26,7 @@ func Rewrite(repoPath string) error {
 
 // RewriteBranches rewrites specific branches, or all if branches is nil/empty.
 func RewriteBranches(repoPath string, branches []string) error {
-	claimBinary, err := os.Executable()
+	claimBinary, err := executable()
 	if err != nil {
 		return fmt.Errorf("failed to find claim binary path: %w", err)
 	}
@@ -142,6 +154,12 @@ func ChangedBranches(beforeRefs, afterRefs map[string]string) []string {
 // resolveRef finds the actual git ref for a branch name.
 // Checks refs/heads/ first, then refs/remotes/origin/.
 func resolveRef(repoPath, branch string) string {
+	// A detached HEAD is reported by the scanner as the branch name "HEAD".
+	// There is no refs/heads/HEAD to rewrite, so pass HEAD through unchanged.
+	if branch == "HEAD" {
+		return "HEAD"
+	}
+
 	// Try local branch
 	localRef := "refs/heads/" + branch
 	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", localRef)

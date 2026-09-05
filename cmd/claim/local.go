@@ -23,7 +23,8 @@ func runFilterMsg() {
 	input, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s %v\n", red("error:"), err)
-		os.Exit(1)
+		exit(1)
+		return
 	}
 	fmt.Print(filter.StripClaudeCoAuthor(string(input)))
 }
@@ -47,14 +48,7 @@ func resolveRepos(absPath string, force bool) []string {
 				bold(fmt.Sprintf("%d nested repo(s)", len(nested))),
 				bold(filepath.Base(absPath)))
 
-			var include bool
-			_ = huh.NewConfirm().
-				Title("Include nested repos?").
-				Affirmative("Yes").
-				Negative("No").
-				Value(&include).
-				Run()
-			if include {
+			if confirm("Include nested repos?") {
 				for _, r := range nested {
 					repos = append(repos, r.Path)
 				}
@@ -97,16 +91,11 @@ func resolveRepos(absPath string, force bool) []string {
 		options = append(options, huh.NewOption(r.Name+" — "+relPath, r.Path))
 	}
 
-	var selected string
-	err := huh.NewSelect[string]().
-		Title("Select a repo").
-		Options(options...).
-		Height(15).
-		Value(&selected).
-		Run()
+	selected, err := selectOne("Select a repo", options, 15)
 	if err != nil || selected == "" {
 		fmt.Printf("\n%s Aborted.\n", red("✗"))
-		os.Exit(0)
+		exit(0)
+		return nil
 	}
 
 	if selected == "__all__" {
@@ -149,19 +138,14 @@ func runClaim(folder string) {
 	// Ask branch scope once for all repos
 	defaultOnly := false
 	if !force {
-		var scope string
 		title := "Which branches to scan?"
 		if len(repos) == 1 {
 			title = fmt.Sprintf("Which branches to scan in %s?", filepath.Base(repos[0]))
 		}
-		_ = huh.NewSelect[string]().
-			Title(title).
-			Options(
-				huh.NewOption("Default branch only (faster)", "default"),
-				huh.NewOption("All branches (thorough)", "all"),
-			).
-			Value(&scope).
-			Run()
+		scope, _ := selectOne(title, []huh.Option[string]{
+			huh.NewOption("Default branch only (faster)", "default"),
+			huh.NewOption("All branches (thorough)", "all"),
+		}, 0)
 		defaultOnly = scope == "default"
 	}
 

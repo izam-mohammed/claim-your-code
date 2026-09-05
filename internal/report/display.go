@@ -20,6 +20,29 @@ var (
 	boldGreen = color.New(color.Bold, color.FgGreen).SprintFunc()
 )
 
+// selectReport asks which report to view. Tests replace it to answer
+// without a terminal.
+var selectReport = func(options []huh.Option[string]) (string, error) {
+	var selected string
+	err := huh.NewSelect[string]().
+		Title("Select a report to view").
+		Options(options...).
+		Height(15).
+		Value(&selected).
+		Run()
+	return selected, err
+}
+
+// SetSelectReport replaces the report picker and returns a function that puts
+// the old one back. Tests in other packages use it: without a stub the picker
+// draws a real form, and on a runner with a console attached it then blocks on
+// a keypress nobody is there to press.
+func SetSelectReport(fn func(options []huh.Option[string]) (string, error)) (restore func()) {
+	prev := selectReport
+	selectReport = fn
+	return func() { selectReport = prev }
+}
+
 // statusIcon returns a colored icon for the result status.
 func statusIcon(status string) string {
 	switch status {
@@ -95,13 +118,7 @@ func PrintListAndSelect(reports []*Report) {
 		options[i] = huh.NewOption(label, r.ID)
 	}
 
-	var selected string
-	err := huh.NewSelect[string]().
-		Title("Select a report to view").
-		Options(options...).
-		Height(15).
-		Value(&selected).
-		Run()
+	selected, err := selectReport(options)
 	if err != nil || selected == "" {
 		return
 	}

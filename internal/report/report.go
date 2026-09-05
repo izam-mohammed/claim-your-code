@@ -226,7 +226,14 @@ func (r *Report) SetReverted() {
 }
 
 // IsRevertible returns true if this report was a successful clean that hasn't been reverted.
+//
+// Remote cleans are never revertible: they run in a temporary clone that is
+// deleted when the command exits, so the refs recorded against them do not
+// name anything that still exists on disk.
 func (r *Report) IsRevertible() bool {
+	if r.IsRemote() {
+		return false
+	}
 	if r.Result == nil || r.Result.Status != "cleaned" || r.Reverted != nil {
 		return false
 	}
@@ -275,6 +282,20 @@ func List(repoPath string) ([]*Report, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A file where the reports directory should be is a broken data
+	// directory, not an empty one. Windows reports no error for a listing of
+	// a plain file, so ask what the path is rather than trusting ReadDir.
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s is not a directory", dir)
+	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {

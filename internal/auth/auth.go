@@ -24,6 +24,51 @@ var (
 	bold   = color.New(color.Bold).SprintFunc()
 )
 
+// apiBase is the GitHub API root. Overridden in tests.
+var apiBase = "https://api.github.com"
+
+// The prompts and input source below are variables so tests can drive the
+// interactive flows without a terminal.
+
+// selectOption asks the user to pick one option.
+var selectOption = func(title string, options []huh.Option[string]) (string, error) {
+	var choice string
+	err := huh.NewSelect[string]().
+		Title(title).
+		Options(options...).
+		Value(&choice).
+		Run()
+	return choice, err
+}
+
+// confirmPrompt asks a yes/no question, answering no if it cannot run.
+var confirmPrompt = func(title, affirmative, negative string) bool {
+	var yes bool
+	err := huh.NewConfirm().
+		Title(title).
+		Affirmative(affirmative).
+		Negative(negative).
+		Value(&yes).
+		Run()
+	if err != nil {
+		return false
+	}
+	return yes
+}
+
+// promptInput is where promptPAT reads a pasted token from.
+var promptInput io.Reader = os.Stdin
+
+// interactive reports whether there is a terminal to prompt on. Without one
+// there is nobody to answer a picker, so claim must decide for itself.
+var interactive = func() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
 type foundToken struct {
 	token  string
 	source string
@@ -59,6 +104,26 @@ func GetToken() (string, error) {
 		}
 	}
 
+	// CLAIM_GITHUB_TOKEN is claim's own variable: setting it is an
+	// instruction, not one more candidate to offer in a menu.
+	if explicit := os.Getenv("CLAIM_GITHUB_TOKEN"); explicit != "" {
+		for _, f := range found {
+			if f.token == explicit {
+				fmt.Printf("  %s Authenticated as %s %s\n", green("✓"), bold("@"+f.user), dim("(CLAIM_GITHUB_TOKEN)"))
+				return f.token, nil
+			}
+		}
+	}
+
+	// With no terminal, a picker cannot be drawn and failing on it would make
+	// claim unusable from CI or a script. Take the first credential that
+	// validated instead, and say which one.
+	if len(found) > 0 && !interactive() {
+		f := found[0]
+		fmt.Printf("  %s Authenticated as %s %s\n", green("✓"), bold("@"+f.user), dim("("+f.source+", chosen non-interactively)"))
+		return f.token, nil
+	}
+
 	// If tokens found, let user pick
 	if len(found) > 0 {
 		options := make([]huh.Option[string], 0, len(found)+2)
@@ -71,12 +136,7 @@ func GetToken() (string, error) {
 		options = append(options, huh.NewOption("Add another account", "other"))
 		options = append(options, huh.NewOption("Continue without auth (public repos only)", "public"))
 
-		var choice string
-		err := huh.NewSelect[string]().
-			Title("GitHub account").
-			Options(options...).
-			Value(&choice).
-			Run()
+		choice, err := selectOption("GitHub account", options)
 		if err != nil {
 			return "", fmt.Errorf("cancelled")
 		}
@@ -94,6 +154,11 @@ func GetToken() (string, error) {
 				return f.token, nil
 			}
 		}
+	}
+
+	if !interactive() {
+		return "", fmt.Errorf("no GitHub credentials found and no terminal to ask on — " +
+			"set CLAIM_GITHUB_TOKEN, or run claim interactively to sign in")
 	}
 
 	// No accounts or user wants to add another
@@ -131,12 +196,7 @@ func promptForAuth() (string, error) {
 	}
 	options = append(options, huh.NewOption("Personal Access Token — paste a token manually", "pat"))
 
-	var method string
-	err := huh.NewSelect[string]().
-		Title("Choose authentication method").
-		Options(options...).
-		Value(&method).
-		Run()
+	method, err := selectOption("Choose authentication method", options)
 	if err != nil {
 		return "", fmt.Errorf("auth selection cancelled")
 	}
@@ -159,7 +219,7 @@ func promptForAuth() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("gh CLI token is invalid: %w", err)
 		}
-		if !HasRepoScope(scopes) {
+		if scopes.MissingRepoScope() {
 			fmt.Printf("\n  %s gh CLI token is missing the %s scope.\n", yellow("⚠"), cyan("repo"))
 			fmt.Printf("  Run: %s\n", cyan("gh auth refresh -s repo"))
 		}
@@ -184,7 +244,7 @@ func saveTokenWithUser(token, method string) {
 }
 
 func promptPAT() (string, error) {
-	reader := bufio.NewReader(os.Stdin)
+	reader := bufio.NewReader(promptInput)
 
 	for {
 		fmt.Println()
@@ -201,31 +261,17 @@ func promptPAT() (string, error) {
 		scopes, err := ValidateTokenScopes(token)
 		if err != nil {
 			fmt.Printf("\n  %s Token is invalid: %v\n", red("✗"), err)
-			var retry bool
-			_ = huh.NewConfirm().
-				Title("Try another token?").
-				Affirmative("Yes").
-				Negative("No").
-				Value(&retry).
-				Run()
-			if !retry {
+			if !confirmPrompt("Try another token?", "Yes", "No") {
 				return "", fmt.Errorf("invalid token")
 			}
 			continue
 		}
 
-		if !HasRepoScope(scopes) {
+		if scopes.MissingRepoScope() {
 			fmt.Printf("\n  %s Token is missing the %s scope.\n", yellow("⚠"), cyan("repo"))
-			fmt.Printf("  Current scopes: %s\n", dim(strings.Join(scopes, ", ")))
+			fmt.Printf("  Current scopes: %s\n", dim(strings.Join(scopes.List, ", ")))
 			fmt.Printf("  The %s scope is required to access repository data.\n", cyan("repo"))
-			var retry bool
-			_ = huh.NewConfirm().
-				Title("Try another token with the correct scope?").
-				Affirmative("Yes, enter new token").
-				Negative("No, use this token anyway").
-				Value(&retry).
-				Run()
-			if retry {
+			if confirmPrompt("Try another token with the correct scope?", "Yes, enter new token", "No, use this token anyway") {
 				continue
 			}
 		}
@@ -235,44 +281,69 @@ func promptPAT() (string, error) {
 	}
 }
 
+// TokenScopes is what GitHub reported about a token's permissions.
+//
+// Listed says whether GitHub sent an X-OAuth-Scopes header at all. It only
+// does so for classic tokens; fine-grained personal access tokens and app
+// installation tokens carry their permissions out of band, so for those there
+// is no scope list to inspect and List is empty with Listed false.
+type TokenScopes struct {
+	List   []string
+	Listed bool
+}
+
+// MissingRepoScope reports whether the token is known to lack repo access.
+//
+// It is false when GitHub listed no scopes: that is not evidence of a problem,
+// and warning there would flag every fine-grained token as broken.
+func (s TokenScopes) MissingRepoScope() bool {
+	if !s.Listed {
+		return false
+	}
+	return !HasRepoScope(s.List)
+}
+
 // ValidateToken checks if a token is valid by calling GET /user.
 func ValidateToken(token string) error {
 	_, err := validateTokenWithScopes(token)
 	return err
 }
 
-// ValidateTokenScopes checks if a token is valid AND returns its scopes.
-func ValidateTokenScopes(token string) ([]string, error) {
+// ValidateTokenScopes checks if a token is valid AND reports its scopes.
+func ValidateTokenScopes(token string) (TokenScopes, error) {
 	return validateTokenWithScopes(token)
 }
 
-func validateTokenWithScopes(token string) ([]string, error) {
-	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
+func validateTokenWithScopes(token string) (TokenScopes, error) {
+	req, err := http.NewRequest("GET", apiBase+"/user", nil)
 	if err != nil {
-		return nil, err
+		return TokenScopes{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return TokenScopes{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("token validation failed: HTTP %d", resp.StatusCode)
+		return TokenScopes{}, fmt.Errorf("token validation failed: HTTP %d", resp.StatusCode)
 	}
 
-	scopeHeader := resp.Header.Get("X-OAuth-Scopes")
+	// Header.Get cannot tell an absent header from an empty one, and the
+	// difference is exactly what matters here.
+	values, listed := resp.Header[http.CanonicalHeaderKey("X-OAuth-Scopes")]
+
 	var scopes []string
-	for _, s := range strings.Split(scopeHeader, ",") {
+	for _, s := range strings.Split(strings.Join(values, ","), ",") {
 		s = strings.TrimSpace(s)
 		if s != "" {
 			scopes = append(scopes, s)
 		}
 	}
-	return scopes, nil
+	return TokenScopes{List: scopes, Listed: listed}, nil
 }
 
 // HasRepoScope checks if "repo" scope is present.
@@ -287,7 +358,7 @@ func HasRepoScope(scopes []string) bool {
 
 // validateAndGetUser validates a token and returns the GitHub username.
 func validateAndGetUser(token string) string {
-	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
+	req, err := http.NewRequest("GET", apiBase+"/user", nil)
 	if err != nil {
 		return ""
 	}
@@ -340,12 +411,7 @@ func Logout(username string) error {
 	}
 	options = append(options, huh.NewOption("Remove all accounts", "__all__"))
 
-	var choice string
-	err := huh.NewSelect[string]().
-		Title("Which account to remove?").
-		Options(options...).
-		Value(&choice).
-		Run()
+	choice, err := selectOption("Which account to remove?", options)
 	if err != nil {
 		return nil
 	}

@@ -78,7 +78,7 @@ func runReport() {
 
 func runRevert() {
 	if len(os.Args) < 3 {
-		fatalf("Usage: claim revert <id>")
+		fatalf("missing argument — run `claim revert --help`\n\n  Usage: claim revert <id>")
 	}
 
 	idArg := os.Args[2]
@@ -93,14 +93,22 @@ func runRevert() {
 
 func revertReport(repoPath string, rpt *report.Report) {
 	if !rpt.IsRevertible() {
-		if rpt.Reverted != nil {
+		switch {
+		case rpt.Reverted != nil:
 			fmt.Fprintf(os.Stderr, "%s Report %s has already been reverted.\n", red("Error:"), cyan(rpt.ID))
-		} else if rpt.Result == nil || rpt.Result.Status != "cleaned" {
+		case rpt.IsRemote():
+			fmt.Fprintf(os.Stderr, "%s Report %s is a remote clean, which cannot be reverted.\n", red("Error:"), cyan(rpt.ID))
+			fmt.Fprintf(os.Stderr, "  It ran in a temporary clone that no longer exists. To restore %s,\n", bold(rpt.RemoteURL))
+			fmt.Fprintf(os.Stderr, "  push the history you want from a copy that still has it.\n")
+		case rpt.Result == nil:
+			fmt.Fprintf(os.Stderr, "%s Report %s has no recorded result.\n", red("Error:"), cyan(rpt.ID))
+		case rpt.Result.Status != "cleaned":
 			fmt.Fprintf(os.Stderr, "%s Report %s was not a successful clean (status: %s).\n", red("Error:"), cyan(rpt.ID), rpt.Result.Status)
-		} else {
+		default:
 			fmt.Fprintf(os.Stderr, "%s Report %s has no branch refs to revert to.\n", red("Error:"), cyan(rpt.ID))
 		}
-		os.Exit(1)
+		exit(1)
+		return
 	}
 
 	repoName := filepath.Base(repoPath)

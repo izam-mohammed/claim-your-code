@@ -12,8 +12,11 @@ import (
 
 var apiBase = "https://api.github.com"
 
-// setAPIBase overrides the API base URL (for testing).
-func setAPIBase(url string) { apiBase = url }
+// SetAPIBase overrides the API base URL (for testing).
+func SetAPIBase(url string) { apiBase = url }
+
+// APIBase returns the current API base URL.
+func APIBase() string { return apiBase }
 
 // Client is a lightweight GitHub API client.
 type Client struct {
