@@ -107,13 +107,13 @@ func stubPrompts(t *testing.T, p prompts) {
 	}
 	selectOne = func(title string, opts []huh.Option[string], h int) (string, error) {
 		if p.selectOne == nil {
-			return "", fmt.Errorf("no terminal")
+			return "", errNoTerminal
 		}
 		return p.selectOne(title, opts, h)
 	}
 	selectMany = func(title string, opts []huh.Option[string], h int) ([]string, error) {
 		if p.selectMany == nil {
-			return nil, fmt.Errorf("no terminal")
+			return nil, errNoTerminal
 		}
 		return p.selectMany(title, opts, h)
 	}

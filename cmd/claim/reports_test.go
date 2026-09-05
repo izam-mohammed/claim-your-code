@@ -324,7 +324,7 @@ func TestRevertReportWithNoRecordedResult(t *testing.T) {
 	rpt.SetOriginalRefs(map[string]string{"main": strings.Repeat("a", 40)})
 
 	out, code, exited := runMain(t, []string{"claim"}, func() {
-		revertReport("/repo", rpt)
+		revertReport("/repo", rpt, false)
 	})
 	if !exited || code != 1 {
 		t.Errorf("expected an exit, got (%d, %v)", code, exited)
@@ -351,5 +351,46 @@ func TestClaimRepoOnADetachedHEADWithDefaultScope(t *testing.T) {
 	}
 	if strings.Contains(git(t, repo, "log", "--format=%B"), "anthropic.com") {
 		t.Error("the trailer survived on a detached HEAD")
+	}
+}
+
+func TestRunRevertWithForceSkipsTheConfirmation(t *testing.T) {
+	// revert never looked at --force, so it could only ever be answered by
+	// hand: in a script it printed the plan and aborted.
+	isolateData(t)
+	repo := newRepo(t, filepath.Join(t.TempDir(), "revertforce"))
+	commit(t, repo, "a.txt", "feat: x")
+	head := git(t, repo, "rev-parse", "HEAD")
+	rpt := saveReport(t, repo, map[string]string{"main": head})
+	commit(t, repo, "b.txt", "feat: y") // move main past the recorded tip
+
+	stubPrompts(t, prompts{}) // an unset confirm answers no
+	out, _, _ := runMain(t, []string{"claim", "revert", rpt.ID, "--force"}, runRevert)
+
+	if strings.Contains(out, "Aborted") {
+		t.Errorf("--force should skip the confirmation:\n%s", out)
+	}
+	if got := git(t, repo, "rev-parse", "main"); got != head {
+		t.Errorf("main = %q, want it restored to %q", got, head)
+	}
+}
+
+func TestRunRevertStillConfirmsWithoutForce(t *testing.T) {
+	isolateData(t)
+	repo := newRepo(t, filepath.Join(t.TempDir(), "revertask"))
+	commit(t, repo, "a.txt", "feat: x")
+	head := git(t, repo, "rev-parse", "HEAD")
+	rpt := saveReport(t, repo, map[string]string{"main": head})
+	commit(t, repo, "b.txt", "feat: y")
+	moved := git(t, repo, "rev-parse", "HEAD")
+
+	stubPrompts(t, prompts{})
+	out, _, _ := runMain(t, []string{"claim", "revert", rpt.ID}, runRevert)
+
+	if !strings.Contains(out, "Aborted") {
+		t.Errorf("a declined confirmation should abort:\n%s", out)
+	}
+	if got := git(t, repo, "rev-parse", "main"); got != moved {
+		t.Errorf("main = %q, want it left alone at %q", got, moved)
 	}
 }

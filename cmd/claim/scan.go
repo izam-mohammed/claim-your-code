@@ -70,7 +70,10 @@ func scanRepoViaAPI(client *githubpkg.Client, repo *githubpkg.RepoInfo, branch .
 
 	commits, err := client.ListCommits(repo.Owner, repo.Name, scanBranch, 100)
 	if err != nil {
+		// A scan that could not read the branch has not found "nothing", and
+		// the exit status is what a script reads.
 		fmt.Fprintf(os.Stderr, "  %s %v\n", red("Error:"), err)
+		exit(1)
 		return
 	}
 

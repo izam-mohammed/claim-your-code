@@ -23,11 +23,13 @@ builds:
       - arm64
 
 archives:
-  - format: tar.gz
+  # install.sh builds this exact name, so the two have to agree:
+  # claim_<version>_<os>_<arch>.tar.gz
+  - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
 
 checksum:
   name_template: "checksums.txt"
@@ -39,10 +41,15 @@ changelog:
       - "^docs:"
       - "^test:"
 
+# A formula, not a cask: casks are macOS only, and the README offers Homebrew
+# on Linux too. goreleaser marks `brews` deprecated in favour of
+# `homebrew_casks`; it still works, and this moves the day it stops.
 brews:
   - repository:
       owner: izam-mohammed
       name: homebrew-tap
+      # The default GITHUB_TOKEN cannot write to another repository.
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/izam-mohammed/claim-your-code"
     description: "Strip Co-Authored-By: Claude lines from git commits"
     license: "MIT"
@@ -55,6 +62,7 @@ scoops:
   - repository:
       owner: izam-mohammed
       name: scoop-bucket
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/izam-mohammed/claim-your-code"
     description: "Strip Co-Authored-By: Claude lines from git commits"
     license: "MIT"

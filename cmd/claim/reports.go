@@ -88,10 +88,10 @@ func runRevert() {
 		fatal(err)
 	}
 
-	revertReport(rpt.Repo, rpt)
+	revertReport(rpt.Repo, rpt, hasFlag("--force", "-f"))
 }
 
-func revertReport(repoPath string, rpt *report.Report) {
+func revertReport(repoPath string, rpt *report.Report, force bool) {
 	if !rpt.IsRevertible() {
 		switch {
 		case rpt.Reverted != nil:
@@ -123,7 +123,7 @@ func revertReport(repoPath string, rpt *report.Report) {
 	}
 
 	fmt.Printf("\n%s This will restore branches to their pre-claim state.\n", boldRed("⚠"))
-	if !confirm("  Proceed?") {
+	if !force && !confirm("  Proceed?") {
 		fmt.Printf("\n%s Aborted.\n", red("✗"))
 		return
 	}
