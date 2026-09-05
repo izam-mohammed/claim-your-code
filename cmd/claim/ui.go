@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -43,8 +44,29 @@ func fatalf(format string, args ...any) {
 
 // The prompts below are variables so tests can answer them without a terminal.
 
+// errNoTerminal is what the pickers return when there is nobody to answer.
+var errNoTerminal = errors.New("no terminal to prompt on")
+
+// interactive reports whether there is a terminal to draw a prompt on. Without
+// one a form has nobody to answer it: it either fails, or -- where a console
+// is attached but no human is watching, as on a CI runner -- sits waiting for
+// a keypress that never comes. The prompts answer for themselves instead.
+// internal/auth makes the same check for the same reason.
+var interactive = hasTerminal
+
+func hasTerminal() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
 // confirm asks a yes/no question, answering no if the prompt cannot run.
 var confirm = func(title string) bool {
+	if !interactive() {
+		return false
+	}
 	var yes bool
 	err := huh.NewConfirm().
 		Title(title).
@@ -60,6 +82,9 @@ var confirm = func(title string) bool {
 
 // confirmDangerous requires explicit "confirm" input for destructive actions.
 var confirmDangerous = func(title string) bool {
+	if !interactive() {
+		return false
+	}
 	var input string
 	err := huh.NewInput().
 		Title(title).
@@ -74,6 +99,9 @@ var confirmDangerous = func(title string) bool {
 
 // selectOne asks the user to pick a single option.
 var selectOne = func(title string, options []huh.Option[string], height int) (string, error) {
+	if !interactive() {
+		return "", errNoTerminal
+	}
 	var choice string
 	sel := huh.NewSelect[string]().
 		Title(title).
@@ -88,6 +116,9 @@ var selectOne = func(title string, options []huh.Option[string], height int) (st
 
 // selectMany asks the user to pick any number of options.
 var selectMany = func(title string, options []huh.Option[string], height int) ([]string, error) {
+	if !interactive() {
+		return nil, errNoTerminal
+	}
 	var chosen []string
 	sel := huh.NewMultiSelect[string]().
 		Title(title).

@@ -27,6 +27,9 @@ func TestMain(m *testing.M) {
 	report.SetSelectReport(func([]huh.Option[string]) (string, error) {
 		return "", fmt.Errorf("no terminal")
 	})
+	// Same for this package's own prompts: a test that reaches a real one
+	// gets the no-terminal answer, never a form waiting on a keypress.
+	interactive = func() bool { return false }
 	os.Exit(m.Run())
 }
 
@@ -172,6 +175,17 @@ func breakDataDirMidRun() (restore func()) {
 
 // dataDirVars are every variable report.DataDir consults, across platforms.
 var dataDirVars = []string{"HOME", "XDG_DATA_HOME", "LocalAppData"}
+
+// stubInteractive decides what the prompts think about the terminal, so a test
+// covers the answer it means to cover wherever it runs. Without it the result
+// depends on the machine: no terminal on a CI runner, a real one on a
+// developer's, and on Windows a console that a form will sit and wait on.
+func stubInteractive(t *testing.T, on bool) {
+	t.Helper()
+	prev := interactive
+	interactive = func() bool { return on }
+	t.Cleanup(func() { interactive = prev })
+}
 
 // stubFilter points the rewriter at a shell stub that strips Claude trailers,
 // standing in for the real claim binary.

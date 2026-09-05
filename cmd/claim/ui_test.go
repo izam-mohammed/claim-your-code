@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -226,6 +227,7 @@ func TestSummariseReposNoCleanCountIsOmitted(t *testing.T) {
 
 func TestConfirmDefaultsToNoWithoutATerminal(t *testing.T) {
 	// The real prompts, not the stubs — with no TTY they must answer safely.
+	stubInteractive(t, false)
 	if confirm("proceed?") {
 		t.Error("confirm returned true with no terminal — the safe answer is no")
 	}
@@ -234,7 +236,27 @@ func TestConfirmDefaultsToNoWithoutATerminal(t *testing.T) {
 	}
 }
 
+func TestHasTerminalSaysNoForARedirectedStdin(t *testing.T) {
+	// The real check this time, not the seam the other tests drive.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = prev
+		r.Close()
+		w.Close()
+	})
+
+	if hasTerminal() {
+		t.Error("hasTerminal = true with a pipe on stdin, want no terminal")
+	}
+}
+
 func TestSelectPromptsErrorWithoutATerminal(t *testing.T) {
+	stubInteractive(t, false)
 	if _, err := selectOne("pick", nil, 0); err == nil {
 		t.Error("selectOne should fail with no terminal")
 	}
