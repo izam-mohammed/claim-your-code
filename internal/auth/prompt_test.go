@@ -195,7 +195,7 @@ func TestGetTokenUsesGhCLIToken(t *testing.T) {
 	stubInteractive(t, true)
 	clearTokenEnv(t)
 	dir := t.TempDir()
-	if err := writeStub(dir, "gh", "#!/bin/sh\necho ghp_from_gh\n"); err != nil {
+	if err := writeStub(dir, "gh", "ghp_from_gh", 0); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
@@ -287,7 +287,7 @@ func TestPromptForAuthOffersGhCLIOnlyWhenInstalled(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	if err := writeStub(dir, "gh", "#!/bin/sh\necho tok\n"); err != nil {
+	if err := writeStub(dir, "gh", "tok", 0); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
@@ -301,7 +301,7 @@ func TestPromptForAuthOffersGhCLIOnlyWhenInstalled(t *testing.T) {
 func TestPromptForAuthViaGhCLI(t *testing.T) {
 	isolateStore(t)
 	dir := t.TempDir()
-	if err := writeStub(dir, "gh", "#!/bin/sh\necho ghp_gh_token\n"); err != nil {
+	if err := writeStub(dir, "gh", "ghp_gh_token", 0); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
@@ -326,7 +326,7 @@ func TestPromptForAuthViaGhCLI(t *testing.T) {
 func TestPromptForAuthGhCLIWarnsOnMissingRepoScope(t *testing.T) {
 	isolateStore(t)
 	dir := t.TempDir()
-	if err := writeStub(dir, "gh", "#!/bin/sh\necho ghp_gh_token\n"); err != nil {
+	if err := writeStub(dir, "gh", "ghp_gh_token", 0); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
@@ -348,7 +348,7 @@ func TestPromptForAuthGhCLIWarnsOnMissingRepoScope(t *testing.T) {
 func TestPromptForAuthGhCLIFailure(t *testing.T) {
 	isolateStore(t)
 	dir := t.TempDir()
-	if err := writeStub(dir, "gh", "#!/bin/sh\nexit 1\n"); err != nil {
+	if err := writeStub(dir, "gh", "", 1); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
@@ -362,7 +362,7 @@ func TestPromptForAuthGhCLIFailure(t *testing.T) {
 func TestPromptForAuthGhCLITokenRejected(t *testing.T) {
 	isolateStore(t)
 	dir := t.TempDir()
-	if err := writeStub(dir, "gh", "#!/bin/sh\necho stale\n"); err != nil {
+	if err := writeStub(dir, "gh", "stale", 0); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)

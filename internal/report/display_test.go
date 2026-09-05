@@ -328,3 +328,21 @@ func TestPrintListAndSelectCancelled(t *testing.T) {
 		t.Errorf("a cancelled picker should not render a detail view\n---\n%s", out)
 	}
 }
+
+func TestSetSelectReportSwapsAndRestores(t *testing.T) {
+	// The seam other packages reach the picker through: without it a test
+	// binary elsewhere draws a real form and waits for a keypress.
+	stubSelect(t, "clm_original", nil)
+
+	restore := SetSelectReport(func([]huh.Option[string]) (string, error) {
+		return "clm_replacement", nil
+	})
+	if got, _ := selectReport(nil); got != "clm_replacement" {
+		t.Errorf("selectReport = %q, want the replacement", got)
+	}
+
+	restore()
+	if got, _ := selectReport(nil); got != "clm_original" {
+		t.Errorf("selectReport = %q, want the original back", got)
+	}
+}

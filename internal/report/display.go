@@ -33,6 +33,16 @@ var selectReport = func(options []huh.Option[string]) (string, error) {
 	return selected, err
 }
 
+// SetSelectReport replaces the report picker and returns a function that puts
+// the old one back. Tests in other packages use it: without a stub the picker
+// draws a real form, and on a runner with a console attached it then blocks on
+// a keypress nobody is there to press.
+func SetSelectReport(fn func(options []huh.Option[string]) (string, error)) (restore func()) {
+	prev := selectReport
+	selectReport = fn
+	return func() { selectReport = prev }
+}
+
 // statusIcon returns a colored icon for the result status.
 func statusIcon(status string) string {
 	switch status {

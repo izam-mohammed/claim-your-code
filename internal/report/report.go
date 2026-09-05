@@ -282,6 +282,20 @@ func List(repoPath string) ([]*Report, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A file where the reports directory should be is a broken data
+	// directory, not an empty one. Windows reports no error for a listing of
+	// a plain file, so ask what the path is rather than trusting ReadDir.
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s is not a directory", dir)
+	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {

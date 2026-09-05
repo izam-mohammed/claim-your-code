@@ -213,8 +213,7 @@ func TestRunLogoutRemoveNamedAccountFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Break the data directory so the removal cannot be written back.
-	t.Setenv("HOME", "")
-	t.Setenv("XDG_DATA_HOME", "")
+	breakDataDir(t)
 
 	_, code, exited := runMain(t, []string{"claim", "logout", "izam"}, runLogout)
 	if exited && code != 1 {
@@ -264,8 +263,7 @@ func TestClaimRepoRefCaptureFailureIsWarnedAbout(t *testing.T) {
 	// failure by breaking the data directory mid-run.
 	stubFilter(t)
 	repo := dirtyRepo(t, filepath.Join(t.TempDir(), "warn"))
-	t.Setenv("HOME", "")
-	t.Setenv("XDG_DATA_HOME", "")
+	breakDataDir(t)
 
 	out, _, _ := runMain(t, []string{"claim"}, func() {
 		claimRepo(repo, false, true, false)
@@ -277,8 +275,7 @@ func TestClaimRepoRefCaptureFailureIsWarnedAbout(t *testing.T) {
 
 func TestClaimRepoDryRunReportSaveFailureWarns(t *testing.T) {
 	repo := dirtyRepo(t, filepath.Join(t.TempDir(), "warn2"))
-	t.Setenv("HOME", "")
-	t.Setenv("XDG_DATA_HOME", "")
+	breakDataDir(t)
 
 	out, _, _ := runMain(t, []string{"claim"}, func() {
 		claimRepo(repo, true, true, false)
@@ -290,8 +287,7 @@ func TestClaimRepoDryRunReportSaveFailureWarns(t *testing.T) {
 
 func TestClaimRepoAbortReportSaveFailureWarns(t *testing.T) {
 	repo := dirtyRepo(t, filepath.Join(t.TempDir(), "warn3"))
-	t.Setenv("HOME", "")
-	t.Setenv("XDG_DATA_HOME", "")
+	breakDataDir(t)
 	stubPrompts(t, prompts{confirm: func(string) bool { return false }})
 
 	out, _, _ := runMain(t, []string{"claim"}, func() {
@@ -312,12 +308,7 @@ func TestRevertReportSaveFailureWarns(t *testing.T) {
 	stubPrompts(t, prompts{confirm: func(string) bool { return true }})
 	out, _, _ := runMain(t, []string{"claim", "revert", rpt.ID}, func() {
 		// Break the data directory only once the report is already loaded.
-		os.Setenv("HOME", "")
-		os.Setenv("XDG_DATA_HOME", "")
-		defer func() {
-			os.Unsetenv("HOME")
-			os.Unsetenv("XDG_DATA_HOME")
-		}()
+		defer breakDataDirMidRun()()
 		revertReport(repo, rpt)
 	})
 	if !strings.Contains(out, "Failed to record revert") {

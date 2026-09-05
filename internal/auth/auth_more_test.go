@@ -1,10 +1,13 @@
 package auth
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -331,8 +334,7 @@ func TestGhAuthTokenFailsWithoutTheCLI(t *testing.T) {
 
 func TestGhAuthTokenTrimsOutput(t *testing.T) {
 	dir := t.TempDir()
-	stub := dir + "/gh"
-	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho '  ghp_from_cli  '\n"), 0o755); err != nil {
+	if err := writeStub(dir, "gh", "  ghp_from_cli  ", 0); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
@@ -353,7 +355,7 @@ func TestOpenBrowserUsesAStubCommand(t *testing.T) {
 	// Replace whatever opener this OS uses with a no-op on PATH.
 	dir := t.TempDir()
 	for _, name := range []string{"open", "xdg-open", "rundll32"} {
-		if err := os.WriteFile(dir+"/"+name, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		if err := writeStub(dir, name, "", 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -561,9 +563,25 @@ func TestOAuthClientIDIsSet(t *testing.T) {
 	}
 }
 
-// writeStub creates an executable shell stub named name inside dir.
-func writeStub(dir, name, body string) error {
-	return os.WriteFile(dir+"/"+name, []byte(body), 0o755)
+// writeStub puts a fake executable named name on dir: it prints stdout and
+// exits with code. Windows cannot run a #!/bin/sh file it finds on PATH, so
+// the stub is a .bat there -- which is what a real gh install looks like to
+// exec.LookPath anyway.
+func writeStub(dir, name, stdout string, code int) error {
+	if runtime.GOOS == "windows" {
+		body := "@echo off\r\n"
+		if stdout != "" {
+			body += "echo " + stdout + "\r\n"
+		}
+		body += fmt.Sprintf("exit /b %d\r\n", code)
+		return os.WriteFile(filepath.Join(dir, name+".bat"), []byte(body), 0o644)
+	}
+	body := "#!/bin/sh\n"
+	if stdout != "" {
+		body += "echo '" + stdout + "'\n"
+	}
+	body += fmt.Sprintf("exit %d\n", code)
+	return os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755)
 }
 
 func TestDeviceFlowStopsWhenTheUserDenies(t *testing.T) {

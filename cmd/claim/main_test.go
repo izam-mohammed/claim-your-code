@@ -15,11 +15,18 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/fatih/color"
+	"github.com/izam-mohammed/claim-your-code/internal/report"
 	"github.com/izam-mohammed/claim-your-code/internal/rewriter"
 )
 
 func TestMain(m *testing.M) {
 	color.NoColor = true // assert on plain text, not escape codes
+	// No test in this package may draw the report picker. Nothing here can
+	// answer it, and where a console is attached -- the Windows runner --
+	// huh blocks on a keypress until the package times out.
+	report.SetSelectReport(func([]huh.Option[string]) (string, error) {
+		return "", fmt.Errorf("no terminal")
+	})
 	os.Exit(m.Run())
 }
 
@@ -131,6 +138,40 @@ func isolateData(t *testing.T) {
 		t.Setenv("XDG_DATA_HOME", tmp)
 	}
 }
+
+// breakDataDir makes report.DataDir fail for the rest of the test, so the
+// paths that warn about a report they could not save can be exercised. Each
+// OS derives the directory from a different variable, so clearing one is not
+// enough -- on Windows HOME means nothing and %LocalAppData% decides.
+func breakDataDir(t *testing.T) {
+	t.Helper()
+	for _, key := range dataDirVars {
+		t.Setenv(key, "")
+	}
+}
+
+// breakDataDirMidRun is breakDataDir for a flow that has to load a report
+// before the directory goes away, so it cannot be broken up front. The
+// returned function puts the environment back.
+func breakDataDirMidRun() (restore func()) {
+	prev := make(map[string]string, len(dataDirVars))
+	for _, key := range dataDirVars {
+		prev[key] = os.Getenv(key)
+		os.Setenv(key, "")
+	}
+	return func() {
+		for key, value := range prev {
+			if value == "" {
+				os.Unsetenv(key)
+				continue
+			}
+			os.Setenv(key, value)
+		}
+	}
+}
+
+// dataDirVars are every variable report.DataDir consults, across platforms.
+var dataDirVars = []string{"HOME", "XDG_DATA_HOME", "LocalAppData"}
 
 // stubFilter points the rewriter at a shell stub that strips Claude trailers,
 // standing in for the real claim binary.
