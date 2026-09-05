@@ -8,7 +8,7 @@ import (
 
 func TestAccountStoreRoundTrip(t *testing.T) {
 	// An account entry must hold the token encrypted, never in plaintext.
-	token := "ghp_test_abc123"
+	token := "ghp_test_abc123" // gitleaks:allow -- a made-up fixture, not a token
 	encrypted, err := crypt.Encrypt(token)
 	if err != nil {
 		t.Fatal(err)

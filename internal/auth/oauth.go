@@ -15,7 +15,11 @@ import (
 // OAuth App client ID for claim-your-code.
 // This is a public client ID — safe to embed in the binary.
 // Registered at: https://github.com/settings/applications
-const oauthClientID = "Ov23liGrayvWtyIWfuvZ"
+//
+// The gitleaks:allow below clears the secret gate: a client ID ships inside
+// every distributed binary and is useless without the user completing the
+// device flow, so it is not a credential.
+const oauthClientID = "Ov23liGrayvWtyIWfuvZ" // gitleaks:allow
 
 // oauthBase is the GitHub OAuth host. Overridden in tests.
 var oauthBase = "https://github.com"
