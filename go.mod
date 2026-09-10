@@ -1,12 +1,12 @@
 module github.com/izam-mohammed/claim-your-code
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/charmbracelet/huh v1.0.0
 	github.com/fatih/color v1.19.0
 	github.com/go-git/go-git/v5 v5.19.2
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 )
 
 require (
