@@ -1,0 +1,6 @@
+# history-only findings the scheduled full scan keeps tripping on.
+# both lines are already marked gitleaks:allow at HEAD.
+# oauth.go: public device-flow client id, ships in every binary.
+4c4ead3ee0d04a87b09e34eec727e433b58f0fce:internal/auth/oauth.go:generic-api-key:17
+# auth_test.go: made-up fixture token.
+4c4ead3ee0d04a87b09e34eec727e433b58f0fce:internal/auth/auth_test.go:generic-api-key:11
