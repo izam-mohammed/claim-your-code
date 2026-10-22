@@ -90,18 +90,18 @@ tells reporters how to reach the owner privately.
 
 ### Phase 1: topics
 
-- [ ] Topics set to `go`, `cli`, `git`, `git-history`, `commit-rewrite`,
+- [x] Topics set to `go`, `cli`, `git`, `git-history`, `commit-rewrite`,
   `claude-code`, `github`; check: `gh repo view --json repositoryTopics`
   lists them.
 
 ### Phase 2: Dependabot
 
-- [ ] The `pre-commit` ecosystem added to `.github/dependabot.yml` (weekly,
+- [x] The `pre-commit` ecosystem added to `.github/dependabot.yml` (weekly,
   7-day cooldown, one group, `chore(deps)`); check: the YAML parses.
 
 ### Phase 3: security policy
 
-- [ ] `SECURITY.md` added: supported versions, private reporting link,
+- [x] `SECURITY.md` added: supported versions, private reporting link,
   what happens next, scope; check: no email address or response time is
   invented in it.
 
