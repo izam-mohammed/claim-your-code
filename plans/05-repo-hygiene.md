@@ -107,8 +107,9 @@ tells reporters how to reach the owner privately.
 
 ### Phase 4: open the PR
 
-- [ ] The branch pushed and its PR opened against `main` (or, if one is
+- [x] The branch pushed and its PR opened against `main` (or, if one is
   already open for this branch, its body brought up to date) with a
   Conventional Commit title for the whole change, a body naming this plan,
   what changed and why, and the checks run with their result. The PR's URL
   printed as the evidence. Opened, never merged.
+  Landed 22/10/2026: https://github.com/izam-mohammed/claim-your-code/pull/18
