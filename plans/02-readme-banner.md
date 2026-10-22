@@ -138,11 +138,11 @@ repository instructions for recording useful development findings.
 
 ### Phase 1: the rough cut: a banner on top (needs you: try it)
 
-- [ ] Three concepts for what `claim` does, checked against the skill's
+- [x] Three concepts for what `claim` does, checked against the skill's
   `concepts-used.md`, the strongest built into
   `assets/banner-dark.svg` and `assets/banner-light.svg` by the skill's
   `build.py`, its lint passing.
-- [ ] `README.md` opens with the `<picture>` pair and a one-line alt text
+- [x] `README.md` opens with the `<picture>` pair and a one-line alt text
   saying the joke, the meme moved to the foot per `## Open decisions`.
 - [ ] Check: `make check` passes, and `sh scripts/preview.sh` from the
   skill renders both themes with nothing overlapping.
@@ -156,13 +156,13 @@ repository instructions for recording useful development findings.
   how it works move to `docs/usage.md` (expected), and `README.md` keeps
   the pitch, install, `claim .`, `claim repo owner/repo`, `--dry-run` and a
   link to `docs/usage.md`.
-- [ ] The skill's `concepts-used.md` gains a line for this banner.
+- [x] The skill's `concepts-used.md` gains a line for this banner.
 - [ ] Check: `make check` passes, and every relative link in `README.md`
   and `docs/usage.md` resolves on the pushed branch.
 
 ### Phase 3: open the PR
 
-- [ ] The branch pushed and its PR opened against the branch it was cut from
+- [x] The branch pushed and its PR opened against the branch it was cut from
   (or, if one is already open for this branch, its body brought up to date)
   with a Conventional Commit title for the whole change, a body naming this
   plan, what changed and why, and the checks run with their result. The PR's

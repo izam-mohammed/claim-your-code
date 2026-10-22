@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" role="img" aria-labelledby="t d">
+  <title id="t">claim</title>
+  <desc id="d">A commit card whose co-author line has been painted over with correction fluid, two coats, beside the bottle that did it: every commit, written entirely by you, as long as nobody checks the reflog.</desc>
+
+  <rect width="1200" height="400" rx="24" fill="#f8fafc"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">
+    <!-- the pitch -->
+    <text x="64" y="92" font-size="17" fill="#64748b">a git history, lightly edited</text>
+    <text x="62" y="168" font-size="72" font-weight="700" fill="#0f172a">claim</text>
+    <text x="64" y="218" font-size="21" fill="#334155">Every commit, written entirely by you.</text>
+    <text x="64" y="252" font-size="21" fill="#64748b">(Please don't check the reflog.)</text>
+
+    <g font-size="15">
+      <rect x="64" y="300" width="146" height="34" rx="17" fill="#ffffff" stroke="#cbd5e1"/>
+      <text x="137" y="322" text-anchor="middle" fill="#334155">edits history</text>
+      <rect x="222" y="300" width="168" height="34" rx="17" fill="#ffffff" stroke="#cbd5e1"/>
+      <text x="306" y="322" text-anchor="middle" fill="#334155">keeps the credit</text>
+      <rect x="402" y="300" width="146" height="34" rx="17" fill="#ffffff" stroke="#cbd5e1"/>
+      <text x="475" y="322" text-anchor="middle" fill="#334155">blames nobody</text>
+    </g>
+
+    <!-- the commit, after correction -->
+    <rect x="612" y="78" width="392" height="252" rx="12" fill="#ffffff" stroke="#d5dde8"/>
+    <g font-size="16">
+      <text x="640" y="122" fill="#64748b">commit 9f3e1a7</text>
+      <text x="640" y="154" fill="#0f172a">Author: you</text>
+      <text x="672" y="204" fill="#0f172a">fix: everything, alone</text>
+      <text x="640" y="282" fill="#475569">Co-Authored-By:</text>
+    </g>
+    <!-- two coats of correction fluid -->
+    <path d="M800 258 C812 250 850 252 880 254 C915 250 950 252 972 258 C982 264 980 284 972 292 C950 298 905 294 870 297 C838 299 812 298 802 291 C793 282 793 266 800 258 Z" fill="#fdfcf7" stroke="#b8b3a0" stroke-width="1.5"/>
+    <path d="M812 270 C850 266 910 268 960 272" stroke="#b8b3a0" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+
+    <!-- the bottle -->
+    <rect x="1066" y="118" width="56" height="44" rx="8" fill="#d97706"/>
+    <rect x="1048" y="160" width="92" height="140" rx="16" fill="#f59e0b"/>
+    <rect x="1056" y="200" width="76" height="52" rx="6" fill="#fffbeb"/>
+    <text x="1094" y="232" font-size="12" font-weight="700" text-anchor="middle" fill="#78350f">CORRECTS</text>
+    <text x="1094" y="346" font-size="14" text-anchor="middle" fill="#64748b">(two coats)</text>
+  </g>
+</svg>

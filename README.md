@@ -1,10 +1,12 @@
-# claim
-
 <p align="center">
-  <img src="assets/who-wrote-the-code.png" alt="Anthropic CEO claiming the code is theirs" width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/banner-light.svg">
+    <img src="assets/banner-light.svg" alt="A commit card whose co-author line is painted over with correction fluid: every commit, written entirely by you, as long as nobody checks the reflog." width="100%">
+  </picture>
 </p>
 
-Remove Claude as a co-author from your git commit history.
+**claim** removes Claude as a co-author from your git commit history.
 
 When you use Claude Code (or similar AI tools), commits are automatically co-authored with Claude:
 
@@ -214,3 +216,7 @@ Non-Claude co-author lines are preserved.
 ## License
 
 MIT
+
+<p align="center">
+  <img src="assets/who-wrote-the-code.png" alt="Anthropic CEO claiming the code is theirs" width="100%">
+</p>
