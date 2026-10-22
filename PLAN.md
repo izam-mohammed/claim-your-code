@@ -14,3 +14,8 @@ and site changes after them run through the same gate.
 - [ ] `plans/02-readme-banner.md` - a light and dark banner on top, and a
   minimal README.
 - [ ] `plans/03-site.md` - a one-page site on GitHub Pages.
+
+### Phase 3: the detailed docs
+
+- [ ] `plans/04-docs.md` - an mdBook documentation site at `/docs/`, with
+  a command reference generated from `claim --help`.
