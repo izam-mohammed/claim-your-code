@@ -74,8 +74,7 @@ build. Revisit if a second page is wanted.
 
 `site/index.html`, one self-contained page in the reference's structure:
 a header with the name and links to Releases and GitHub, the pitch in one
-line, the banner from `plans/02-readme-banner.md` (inlined, not fetched, so
-the page stays one file), the install commands for Homebrew, Scoop and
+line, the install commands for Homebrew, Scoop and
 `install.sh`, a "latest release" link to
 `https://github.com/izam-mohammed/claim-your-code/releases/latest`
 (archives carry the version in their names, so there is no stable direct
@@ -107,7 +106,6 @@ Standards: `docs/standards.md` (`make check` once
   inline CSS, no scripts), not its content or colours.
 - `README.md` install section: the commands on the page are the same
   lines.
-- `assets/banner-*.svg` from `plans/02-readme-banner.md`, inlined.
 
 ## Security
 
@@ -152,7 +150,7 @@ repository instructions for recording useful development findings.
 
 ### Phase 1: the rough cut: the page, published (needs you: try it)
 
-- [ ] `site/index.html` with the header, pitch, banner, install commands,
+- [ ] `site/index.html` with the header, pitch, install commands,
   latest-release link and footer, self-contained, readable at 360 px wide.
 - [ ] `.github/workflows/pages.yml` uploads `site/` and deploys it on push
   to `main` and by hand, write permissions on the deploy job only, actions
@@ -165,7 +163,7 @@ repository instructions for recording useful development findings.
 
 ### Phase 2: point people at it
 
-- [ ] `README.md` links the site under the banner, and the repository's
+- [ ] `README.md` links the site near the top, and the repository's
   homepage is set to the Pages URL (`gh repo edit --homepage`).
 - [ ] Check: `make check` passes, and the site URL answers 200.
 

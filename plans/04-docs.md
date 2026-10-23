@@ -18,8 +18,7 @@ entries (`<folder>`, `<github-url>`, `repo`, `pr`, `org`, `user`,
 `report`, `revert`, `logout`), the README's flag table has six flags, and
 there is an authentication flow with three credential
 sources, encrypted reports and a revert. Today all of it sits in a
-216-line README; `plans/02-readme-banner.md` cuts the README to the pitch
-and install and moves the rest to one `docs/usage.md` page. One page
+216-line README. One README
 cannot carry a page per command, and a hand-copied flag table drifts from
 the binary. The binary already has the source of truth:
 `cmd/claim/help.go` keeps every command, argument, flag and example in the
@@ -168,9 +167,9 @@ workflow from `plans/03-site.md` and published at `/docs/` beside the
 landing page (decision 2). The command reference is generated from
 `cmd/claim/help.go` by `TestDocsMatchHelp` (decision 3). `make docs` builds
 the book and runs lychee offline; `make check` runs it (decision 4). The
-book takes over `docs/usage.md` from `plans/02-readme-banner.md`: its
-sections become the getting-started and guide chapters, and the README's
-link points at the published docs, so there is one copy.
+book takes over the README's usage sections: they become the
+getting-started and guide chapters, and the README keeps the pitch and
+install with a link to the published docs, so there is one copy.
 
 Chapters: getting started (install on each platform, first local scan,
 first remote scan), guides (scanning many repositories, authentication and
@@ -193,8 +192,8 @@ Standards: `docs/standards.md` (`make check` once
 | `docs/book/src/getting-started.md` | new | 1 | install and first scan | expected |
 | `docs/book/src/reference/*.md` | new | 2 | generated command pages | fixed |
 | `cmd/claim/docs_test.go` | new | 2 | `TestDocsMatchHelp` | expected |
-| `docs/book/src/guides/*.md` | new | 3 | guides, from `docs/usage.md` | expected |
-| `docs/usage.md` | delete | 3 | moved into the book | expected |
+| `docs/book/src/guides/*.md` | new | 3 | guides, from the README's usage sections | expected |
+| `README.md` | edit | 3 | usage sections moved into the book, a link left | expected |
 | `Makefile` | edit | 1, 4 | `make docs`, tools, in `make check` | reuse |
 | `.github/workflows/pages.yml` | edit | 4 | builds the book into `site/docs/` (the file `plans/03-site.md` lands) | expected |
 | `site/index.html`, `README.md` | edit | 4 | link to `/docs/` (the page `plans/03-site.md` lands) | expected |
@@ -204,8 +203,8 @@ Standards: `docs/standards.md` (`make check` once
 
 - `cmd/claim/help.go` `commands`, `globalFlags`, `commandDoc`: the source
   of every reference page.
-- `docs/usage.md` from `plans/02-readme-banner.md`: the guide text, split
-  into chapters, not rewritten.
+- The README's usage sections: the guide text, split into chapters, not
+  rewritten.
 - `.github/workflows/pages.yml` from `plans/03-site.md`: one deploy for
   both.
 
@@ -291,8 +290,8 @@ repository instructions for recording useful development findings.
 
 - [ ] Guides for many repositories (`org`, `user`, API or clone),
   authentication and saved accounts, reports and `revert`, pushing after a
-  clean, and what it matches, moved from `docs/usage.md`, which is then
-  removed and its links pointed at the book.
+  clean, and what it matches, moved from the README's usage sections into
+  `docs/book/src/guides/`, and those sections shrink to a link to the book.
 - [ ] A troubleshooting page from the errors `claim` prints today, each
   with what to do, and every example output copied from a real run.
 - [ ] Check: `make check` passes, and `make docs` builds with no warning.
