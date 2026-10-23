@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/banner-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="assets/banner-light.svg">
-    <img src="assets/banner-light.svg" alt="A commit card whose co-author line is painted over with correction fluid: every commit, written entirely by you, as long as nobody checks the reflog." width="100%">
+    <img src="assets/banner-light.svg" alt="Two polaroids: you and a robot co-author shipping code, then the same photo after claim, with the robot cut out but its hand still on your shoulder. Please don't check the reflog." width="100%">
   </picture>
 </p>
 

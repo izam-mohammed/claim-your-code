@@ -1,42 +1,86 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" role="img" aria-labelledby="t d">
   <title id="t">claim</title>
-  <desc id="d">A commit card whose co-author line has been painted over with correction fluid, two coats, beside the bottle that did it: every commit, written entirely by you, as long as nobody checks the reflog.</desc>
+  <desc id="d">Two polaroids. Before: you and a robot co-author shipping code at one laptop, the robot's arm round your shoulder, captioned us, shippin' it. In between: dollar claim dot. After: the same photo with the robot cut out with scissors, leaving a hole, but its hand is still on your shoulder, captioned me, shippin' it, alone. A sticky note says: known issue, the hand. Please don't check the reflog.</desc>
 
-  <rect width="1200" height="400" rx="24" fill="#f8fafc"/>
-
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">
-    <!-- the pitch -->
-    <text x="64" y="92" font-size="17" fill="#64748b">a git history, lightly edited</text>
-    <text x="62" y="168" font-size="72" font-weight="700" fill="#0f172a">claim</text>
-    <text x="64" y="218" font-size="21" fill="#334155">Every commit, written entirely by you.</text>
-    <text x="64" y="252" font-size="21" fill="#64748b">(Please don't check the reflog.)</text>
-
-    <g font-size="15">
-      <rect x="64" y="300" width="146" height="34" rx="17" fill="#ffffff" stroke="#cbd5e1"/>
-      <text x="137" y="322" text-anchor="middle" fill="#334155">edits history</text>
-      <rect x="222" y="300" width="168" height="34" rx="17" fill="#ffffff" stroke="#cbd5e1"/>
-      <text x="306" y="322" text-anchor="middle" fill="#334155">keeps the credit</text>
-      <rect x="402" y="300" width="146" height="34" rx="17" fill="#ffffff" stroke="#cbd5e1"/>
-      <text x="475" y="322" text-anchor="middle" fill="#334155">blames nobody</text>
+  <defs>
+    <!-- the photo, minus the robot -->
+    <g id="scene">
+      <rect x="20" y="20" width="300" height="230" fill="#cfe3f7"/>
+      <rect x="20" y="200" width="300" height="50" fill="#b7835a"/>
+      <rect x="78" y="140" width="84" height="76" rx="28" fill="#4f46e5"/>
+      <circle cx="120" cy="112" r="25" fill="#c98d5f"/>
+      <path d="M95 110 a25 25 0 0 1 50 0 q-12 -9 -25 -5 q-14 -6 -25 5z" fill="#2b2118"/>
+      <circle cx="111" cy="115" r="2.6" fill="#1f2328"/><circle cx="129" cy="115" r="2.6" fill="#1f2328"/>
+      <path d="M112 124 q8 7 16 0" fill="none" stroke="#1f2328" stroke-width="2.4" stroke-linecap="round"/>
     </g>
-
-    <!-- the commit, after correction -->
-    <rect x="612" y="78" width="392" height="252" rx="12" fill="#ffffff" stroke="#d5dde8"/>
-    <g font-size="16">
-      <text x="640" y="122" fill="#64748b">commit 9f3e1a7</text>
-      <text x="640" y="154" fill="#0f172a">Author: you</text>
-      <text x="672" y="204" fill="#0f172a">fix: everything, alone</text>
-      <text x="640" y="282" fill="#475569">Co-Authored-By:</text>
+    <g id="laptop">
+      <polygon points="140,202 210,202 205,166 145,166" fill="#9aa4b2"/>
+      <circle cx="175" cy="185" r="6" fill="#e8edf3"/>
     </g>
-    <!-- two coats of correction fluid -->
-    <path d="M800 258 C812 250 850 252 880 254 C915 250 950 252 972 258 C982 264 980 284 972 292 C950 298 905 294 870 297 C838 299 812 298 802 291 C793 282 793 266 800 258 Z" fill="#fdfcf7" stroke="#b8b3a0" stroke-width="1.5"/>
-    <path d="M812 270 C850 266 910 268 960 272" stroke="#b8b3a0" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+    <g id="robot">
+      <line x1="245" y1="86" x2="245" y2="70" stroke="#6b7686" stroke-width="3"/>
+      <circle cx="245" cy="67" r="5" fill="#ef4444"/>
+      <rect x="217" y="86" width="56" height="48" rx="10" fill="#a7b1bf"/>
+      <circle cx="233" cy="107" r="6" fill="#0891b2"/><circle cx="257" cy="107" r="6" fill="#0891b2"/>
+      <rect x="235" y="121" width="20" height="4" rx="2" fill="#6b7686"/>
+      <rect x="239" y="133" width="12" height="9" fill="#6b7686"/>
+      <rect x="207" y="140" width="76" height="76" rx="12" fill="#a7b1bf"/>
+      <rect x="216" y="154" width="58" height="17" rx="3" fill="#ffffff"/>
+      <text x="245" y="166" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9" fill="#1f2328">co-author</text>
+    </g>
+    <g id="arm">
+      <path d="M209 150 C 196 120, 168 116, 152 135" fill="none" stroke="#6b7686" stroke-width="10" stroke-linecap="round"/>
+      <circle cx="149" cy="139" r="9.5" fill="#6b7686"/>
+    </g>
+    <path id="cutline" d="M213 84 L219 79 L237 80 L238 61 L252 59 L254 79 L276 81 L280 93 L278 135 L288 139 L289 201 L202 201 L201 147 L209 137 Z"/>
+    <mask id="hole" maskUnits="userSpaceOnUse" x="0" y="0" width="340" height="320">
+      <rect width="340" height="320" fill="#fff"/>
+      <use href="#cutline" fill="#000"/>
+    </mask>
+  </defs>
 
-    <!-- the bottle -->
-    <rect x="1066" y="118" width="56" height="44" rx="8" fill="#d97706"/>
-    <rect x="1048" y="160" width="92" height="140" rx="16" fill="#f59e0b"/>
-    <rect x="1056" y="200" width="76" height="52" rx="6" fill="#fffbeb"/>
-    <text x="1094" y="232" font-size="12" font-weight="700" text-anchor="middle" fill="#78350f">CORRECTS</text>
-    <text x="1094" y="346" font-size="14" text-anchor="middle" fill="#64748b">(two coats)</text>
+  <!-- before -->
+  <g transform="translate(46 44) rotate(-4 170 160)">
+    <rect x="6" y="9" width="340" height="320" rx="4" fill="#1f2328" fill-opacity="0.10"/>
+    <rect width="340" height="320" rx="4" fill="#ffffff" stroke="#e3e5e8"/>
+    <use href="#scene"/>
+    <use href="#robot"/>
+    <use href="#arm"/>
+    <use href="#laptop"/>
+    <text x="170" y="294" text-anchor="middle" font-family="'Bradley Hand', 'Segoe Print', 'Chalkboard SE', 'Comic Sans MS', cursive" font-size="25" fill="#1f2328">us, shippin' it</text>
+  </g>
+
+  <!-- the command in the middle -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">
+    <text x="482" y="176" font-size="24" font-weight="700" fill="#1f2328">$ claim .</text>
+    <text x="482" y="268" font-size="14" fill="#59636e">(rewrites history)</text>
+  </g>
+  <path d="M418 206 C 452 236, 512 236, 546 204" fill="none" stroke="#59636e" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M532 202 L547 203 L545 218" fill="none" stroke="#59636e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- after: same photo, one fewer author -->
+  <g transform="translate(580 36) rotate(3 170 160)">
+    <rect x="6" y="9" width="340" height="320" rx="4" fill="#1f2328" fill-opacity="0.10"/>
+    <g mask="url(#hole)">
+      <rect width="340" height="320" rx="4" fill="#ffffff" stroke="#e3e5e8"/>
+      <use href="#scene"/>
+      <use href="#arm"/>
+    </g>
+    <use href="#cutline" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 4"/>
+    <use href="#laptop"/>
+    <text x="170" y="294" text-anchor="middle" font-family="'Bradley Hand', 'Segoe Print', 'Chalkboard SE', 'Comic Sans MS', cursive" font-size="25" fill="#1f2328">me, shippin' it. alone.</text>
+  </g>
+
+  <!-- the sticky note -->
+  <g transform="translate(962 104) rotate(5 95 95)">
+    <rect x="3" y="5" width="190" height="190" fill="#1f2328" fill-opacity="0.10"/>
+    <rect width="190" height="190" fill="#fde68a"/>
+    <rect width="190" height="24" fill="#f5d565"/>
+    <g font-family="'Bradley Hand', 'Segoe Print', 'Chalkboard SE', 'Comic Sans MS', cursive" fill="#3b2f0b">
+      <text x="18" y="66" font-size="22" font-weight="700">known issue:</text>
+      <text x="18" y="104" font-size="30" font-weight="700">the hand.</text>
+      <text x="18" y="144" font-size="18">(please don't</text>
+      <text x="18" y="168" font-size="18">check the reflog)</text>
+    </g>
   </g>
 </svg>
